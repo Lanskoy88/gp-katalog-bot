@@ -8,4 +8,14 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000 
+        value: 10000
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: MOYSKLAD_API_TOKEN
+        sync: false
+      - key: MOYSKLAD_ACCOUNT_ID
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true 
