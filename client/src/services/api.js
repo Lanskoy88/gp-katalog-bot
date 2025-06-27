@@ -1,8 +1,19 @@
 import axios from 'axios';
 
+// Автоматически определяем базовый URL
+const getBaseURL = () => {
+  // В продакшне используем текущий домен
+  if (process.env.NODE_ENV === 'production') {
+    return `${window.location.origin}/api`;
+  }
+  
+  // В разработке используем переменную окружения или локальный туннель
+  return process.env.REACT_APP_API_URL || 'https://gp-katalog-images.loca.lt/api';
+};
+
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'https://gp-katalog-images.loca.lt/api',
+  baseURL: getBaseURL(),
   timeout: 10000,
 });
 

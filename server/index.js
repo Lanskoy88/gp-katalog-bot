@@ -42,8 +42,18 @@ if (process.env.ALLOWED_ORIGINS) {
   corsOrigins.push(...process.env.ALLOWED_ORIGINS.split(','));
 }
 
+// Добавляем Railway домены
+if (process.env.RAILWAY_STATIC_URL) {
+  corsOrigins.push(process.env.RAILWAY_STATIC_URL);
+}
+
+// В продакшне разрешаем все домены для Telegram Web App
+if (process.env.NODE_ENV === 'production') {
+  corsOrigins.push('*');
+}
+
 app.use(cors({
-  origin: corsOrigins,
+  origin: process.env.NODE_ENV === 'production' ? true : corsOrigins,
   credentials: true
 }));
 
