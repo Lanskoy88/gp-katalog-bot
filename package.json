@@ -9,7 +9,7 @@
     "build": "cd client && npm install && npm run build",
     "install-all": "npm install && cd client && npm install",
     "check-config": "node check-config.js",
-    "postinstall": "cd client && npm install"
+    "postinstall": "cd client && npm install && npm run build"
   },
   "engines": {
     "node": ">=18.0.0",

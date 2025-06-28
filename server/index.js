@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const moyskladService = require('./services/moyskladService');
@@ -61,14 +62,26 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Static files from React build
-app.use('/static', express.static(path.join(__dirname, '../client/build/static')));
+// Проверяем существование файлов сборки
+const buildPath = path.join(__dirname, '../client/build');
+const indexPath = path.join(buildPath, 'index.html');
+
+// Static files from React build (только если файлы существуют)
+if (fs.existsSync(buildPath)) {
+  app.use('/static', express.static(path.join(buildPath, 'static')));
+  console.log('Static files directory found and configured');
+} else {
+  console.log('Warning: Client build directory not found');
+}
 
 // API routes
 app.use('/api', apiRoutes);
 
 // Telegram bot setup
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
+  polling: true,
+  webHook: false
+});
 
 // Bot handlers
 botHandlers.setup(bot);
@@ -81,12 +94,27 @@ app.post('/webhook', (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    botStatus: bot.isPolling() ? 'polling' : 'stopped'
+  });
 });
 
-// Serve React app for all other routes (SPA)
+// Serve React app for all other routes (SPA) - только если файл существует
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../client/build/index.html'));
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.json({ 
+      message: 'Telegram Bot API is running',
+      status: 'Client build not found, but API is working',
+      endpoints: {
+        health: '/health',
+        api: '/api'
+      }
+    });
+  }
 });
 
 // Error handling middleware
@@ -98,6 +126,8 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Bot is running...`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Base URL: ${process.env.BASE_URL || 'http://localhost:3000'}`);
 });
 
 module.exports = app; 

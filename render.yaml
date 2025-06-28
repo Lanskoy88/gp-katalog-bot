@@ -2,20 +2,21 @@ services:
   - type: web
     name: gp-katalog-bot
     env: node
-    buildCommand: npm run install-all && npm run build
+    plan: free
+    buildCommand: npm run install-all
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 10000
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: MOYSKLAD_API_TOKEN
         sync: false
-      - key: MOYSKLAD_ACCOUNT_ID
+      - key: BASE_URL
         sync: false
-      - key: WEBHOOK_URL
+      - key: ADMIN_IDS
         sync: false
-    healthCheckPath: /api/health
+      - key: ALLOWED_ORIGINS
+        value: "https://web.telegram.org"
+    healthCheckPath: /health
     autoDeploy: true 
