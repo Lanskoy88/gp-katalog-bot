@@ -6,7 +6,7 @@ console.log('🔍 Проверка конфигурации Telegram бота...
 
 // Проверяем обязательные переменные окружения
 const requiredEnvVars = [
-  'TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_BOT_TOKEN',
   'MOYSKLAD_API_TOKEN'
 ];
 
@@ -24,8 +24,8 @@ requiredEnvVars.forEach(varName => {
 // Проверяем опциональные переменные
 const optionalEnvVars = [
   'BASE_URL',
-  'PORT',
-  'NODE_ENV',
+    'PORT',
+    'NODE_ENV',
   'ADMIN_IDS',
   'ALLOWED_ORIGINS'
 ];
@@ -34,7 +34,7 @@ console.log('\n📋 Опциональные переменные:');
 optionalEnvVars.forEach(varName => {
   if (process.env[varName]) {
     console.log(`✅ ${varName}: ${process.env[varName]}`);
-  } else {
+    } else {
     console.log(`⚠️  ${varName}: НЕ УСТАНОВЛЕН`);
   }
 });
@@ -56,7 +56,7 @@ const requiredFiles = [
 requiredFiles.forEach(filePath => {
   if (fs.existsSync(filePath)) {
     console.log(`✅ ${filePath}: НАЙДЕН`);
-  } else {
+    } else {
     console.log(`❌ ${filePath}: НЕ НАЙДЕН`);
   }
 });
@@ -69,7 +69,7 @@ if (fs.existsSync(buildPath)) {
   console.log(`✅ client/build: НАЙДЕН`);
   if (fs.existsSync(indexPath)) {
     console.log(`✅ client/build/index.html: НАЙДЕН`);
-  } else {
+    } else {
     console.log(`❌ client/build/index.html: НЕ НАЙДЕН`);
   }
 } else {
@@ -81,7 +81,7 @@ console.log('\n📊 ИТОГОВАЯ ОЦЕНКА:');
 
 if (missingVars.length === 0) {
   console.log('✅ Все обязательные переменные окружения настроены');
-} else {
+    } else {
   console.log(`❌ Отсутствуют обязательные переменные: ${missingVars.join(', ')}`);
   console.log('\n💡 Для настройки создайте файл .env в корне проекта:');
   console.log('TELEGRAM_BOT_TOKEN=your_bot_token_here');
@@ -91,7 +91,7 @@ if (missingVars.length === 0) {
 
 if (fs.existsSync(indexPath)) {
   console.log('✅ Клиентская сборка готова');
-} else {
+  } else {
   console.log('⚠️  Клиентская сборка отсутствует');
   console.log('💡 Выполните: npm run build');
 }

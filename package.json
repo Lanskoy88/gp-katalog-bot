@@ -9,6 +9,8 @@
     "build": "cd client && npm install && npm run build",
     "install-all": "npm install && cd client && npm install",
     "check-config": "node check-config.js",
+    "test-telegram": "node test-telegram.js",
+    "setup-tunnel": "node setup-tunnel.js",
     "postinstall": "cd client && npm install && npm run build"
   },
   "engines": {

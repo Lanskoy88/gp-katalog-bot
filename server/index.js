@@ -77,11 +77,62 @@ if (fs.existsSync(buildPath)) {
 // API routes
 app.use('/api', apiRoutes);
 
-// Telegram bot setup
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
-  polling: true,
-  webHook: false
-});
+// Telegram bot setup с улучшенной обработкой ошибок
+let bot;
+
+try {
+  bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
+    polling: {
+      interval: 300,
+      autoStart: false,
+      params: {
+        timeout: 10
+      }
+    },
+    webHook: false,
+    request: {
+      timeout: 10000,
+      proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY
+    }
+  });
+
+  // Обработка ошибок подключения
+  bot.on('polling_error', (error) => {
+    console.error('Polling error:', error.message);
+    
+    // Если ошибка связана с DNS или сетью, пробуем переподключиться
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      console.log('Network error detected, attempting to reconnect in 30 seconds...');
+      setTimeout(() => {
+        try {
+          bot.stopPolling();
+          setTimeout(() => {
+            bot.startPolling();
+            console.log('Reconnection attempt completed');
+          }, 5000);
+        } catch (reconnectError) {
+          console.error('Reconnection failed:', reconnectError.message);
+        }
+      }, 30000);
+    }
+  });
+
+  bot.on('error', (error) => {
+    console.error('Bot error:', error.message);
+  });
+
+  // Запускаем polling только если токен валидный
+  if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.length > 10) {
+    bot.startPolling();
+    console.log('Bot polling started successfully');
+  } else {
+    console.warn('Invalid or missing TELEGRAM_BOT_TOKEN, bot not started');
+  }
+
+} catch (error) {
+  console.error('Failed to initialize Telegram bot:', error.message);
+  bot = null;
+}
 
 // Bot handlers
 botHandlers.setup(bot);
@@ -97,7 +148,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    botStatus: bot.isPolling() ? 'polling' : 'stopped'
+    botStatus: bot ? (bot.isPolling() ? 'polling' : 'stopped') : 'not initialized'
   });
 });
 

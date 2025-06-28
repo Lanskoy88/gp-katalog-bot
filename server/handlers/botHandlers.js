@@ -2,101 +2,137 @@ const moyskladService = require('../services/moyskladService');
 
 class BotHandlers {
   setup(bot) {
+    // Проверяем, что бот существует и валиден
+    if (!bot) {
+      console.warn('Bot is not initialized, handlers not set up');
+      return;
+    }
+
+    // Функция для получения правильного URL
+    const getWebAppUrl = (path) => {
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+      
+      // В продакшне используем BASE_URL как есть
+      if (process.env.NODE_ENV === 'production') {
+        return `${baseUrl}${path}`;
+      }
+      
+      // В разработке используем localtunnel если доступен
+      if (baseUrl.includes('loca.lt') || baseUrl.includes('ngrok') || baseUrl.includes('serveo')) {
+        return `${baseUrl}${path}`;
+      }
+      
+      // Иначе используем localhost (будет работать только для тестирования)
+      return `http://localhost:3000${path}`;
+    };
+
     // Обработка команды /start
     bot.onText(/\/start/, async (msg) => {
-      const chatId = msg.chat.id;
-      const username = msg.from.first_name;
-      
-      const welcomeMessage = `Привет, ${username}! 👋\n\nДобро пожаловать в наш каталог товаров! Здесь вы можете просматривать все доступные товары с ценами и изображениями.`;
-      
-      const keyboard = {
-        inline_keyboard: [
-          [
-            {
-              text: '🛍️ Открыть каталог',
-              web_app: {
-                url: `${process.env.BASE_URL || 'http://localhost:3000'}/catalog`
+      try {
+        const chatId = msg.chat.id;
+        const username = msg.from.first_name;
+        
+        const welcomeMessage = `Привет, ${username}! 👋\n\nДобро пожаловать в наш каталог товаров! Здесь вы можете просматривать все доступные товары с ценами и изображениями.`;
+        
+        const keyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: '🛍️ Открыть каталог',
+                web_app: {
+                  url: getWebAppUrl('/catalog')
+                }
               }
-            }
-          ],
-          [
-            {
-              text: '📋 Категории товаров',
-              callback_data: 'categories'
-            }
-          ],
-          [
-            {
-              text: '🔍 Поиск товаров',
-              callback_data: 'search'
-            }
+            ],
+            [
+              {
+                text: '📋 Категории товаров',
+                callback_data: 'categories'
+              }
+            ],
+            [
+              {
+                text: '🔍 Поиск товаров',
+                callback_data: 'search'
+              }
+            ]
           ]
-        ]
-      };
+        };
 
-      await bot.sendMessage(chatId, welcomeMessage, {
-        reply_markup: keyboard,
-        parse_mode: 'HTML'
-      });
+        await bot.sendMessage(chatId, welcomeMessage, {
+          reply_markup: keyboard,
+          parse_mode: 'HTML'
+        });
+      } catch (error) {
+        console.error('Error in /start handler:', error.message);
+      }
     });
 
     // Обработка команды /catalog
     bot.onText(/\/catalog/, async (msg) => {
-      const chatId = msg.chat.id;
-      
-      const keyboard = {
-        inline_keyboard: [
-          [
-            {
-              text: '🛍️ Открыть каталог',
-              web_app: {
-                url: `${process.env.BASE_URL || 'http://localhost:3000'}/catalog`
+      try {
+        const chatId = msg.chat.id;
+        
+        const keyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: '🛍️ Открыть каталог',
+                web_app: {
+                  url: getWebAppUrl('/catalog')
+                }
               }
-            }
+            ]
           ]
-        ]
-      };
+        };
 
-      await bot.sendMessage(chatId, 'Откройте каталог товаров:', {
-        reply_markup: keyboard
-      });
+        await bot.sendMessage(chatId, 'Откройте каталог товаров:', {
+          reply_markup: keyboard
+        });
+      } catch (error) {
+        console.error('Error in /catalog handler:', error.message);
+      }
     });
 
     // Обработка команды /admin (только для администраторов)
     bot.onText(/\/admin/, async (msg) => {
-      const chatId = msg.chat.id;
-      const userId = msg.from.id;
-      
-      // Проверка на администратора (в реальном приложении должна быть проверка по базе данных)
-      const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
-      
-      if (!adminIds.includes(userId.toString())) {
-        await bot.sendMessage(chatId, 'У вас нет доступа к административной панели.');
-        return;
-      }
+      try {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        
+        // Проверка на администратора (в реальном приложении должна быть проверка по базе данных)
+        const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
+        
+        if (!adminIds.includes(userId.toString())) {
+          await bot.sendMessage(chatId, 'У вас нет доступа к административной панели.');
+          return;
+        }
 
-      const keyboard = {
-        inline_keyboard: [
-          [
-            {
-              text: '⚙️ Панель управления',
-              web_app: {
-                url: `${process.env.BASE_URL || 'http://localhost:3000'}/admin`
+        const keyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: '⚙️ Панель управления',
+                web_app: {
+                  url: getWebAppUrl('/admin')
+                }
               }
-            }
-          ],
-          [
-            {
-              text: '📊 Статистика',
-              callback_data: 'admin_stats'
-            }
+            ],
+            [
+              {
+                text: '📊 Статистика',
+                callback_data: 'admin_stats'
+              }
+            ]
           ]
-        ]
-      };
+        };
 
-      await bot.sendMessage(chatId, 'Панель администратора:', {
-        reply_markup: keyboard
-      });
+        await bot.sendMessage(chatId, 'Панель администратора:', {
+          reply_markup: keyboard
+        });
+      } catch (error) {
+        console.error('Error in /admin handler:', error.message);
+      }
     });
 
     // Обработка callback запросов
@@ -193,7 +229,7 @@ class BotHandlers {
             {
               text: '🛍️ Открыть каталог',
               web_app: {
-                url: `${process.env.BASE_URL || 'http://localhost:3000'}/catalog?category=${categoryId}`
+                url: getWebAppUrl(`/catalog?category=${categoryId}`)
               }
             }
           ]
@@ -219,7 +255,7 @@ class BotHandlers {
           {
             text: '🔍 Открыть поиск',
             web_app: {
-              url: `${process.env.BASE_URL || 'http://localhost:3000'}/catalog?search=true`
+              url: getWebAppUrl('/catalog?search=true')
             }
           }
         ]
