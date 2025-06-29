@@ -12,6 +12,7 @@
     "check-render": "node check-render.js",
     "test-telegram": "node test-telegram.js",
     "setup-tunnel": "node setup-tunnel.js",
+    "setup-webhook": "node setup-webhook.js",
     "postinstall": "cd client && npm install && npm run build"
   },
   "engines": {

@@ -14,6 +14,7 @@ const apiRoutes = require('./routes/api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BASE_URL = process.env.BASE_URL || 'https://gp-katalog-bot.onrender.com';
 
 // Trust proxy for rate limiting with localtunnel
 app.set('trust proxy', 1);
@@ -77,57 +78,88 @@ if (fs.existsSync(buildPath)) {
 // API routes
 app.use('/api', apiRoutes);
 
-// Telegram bot setup с улучшенной обработкой ошибок
+// Telegram bot setup с улучшенной обработкой ошибок и поддержкой вебхуков
 let bot;
 
 try {
-  bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
-    polling: {
-      interval: 300,
-      autoStart: false,
-      params: {
-        timeout: 10
+  const isProduction = process.env.NODE_ENV === 'production';
+  const useWebhook = isProduction && process.env.USE_WEBHOOK === 'true';
+  
+  if (useWebhook) {
+    // Конфигурация для вебхуков в продакшене
+    bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
+      webHook: {
+        port: PORT,
+        host: '0.0.0.0'
+      },
+      request: {
+        timeout: 10000,
+        proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY
       }
-    },
-    webHook: false,
-    request: {
-      timeout: 10000,
-      proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY
-    }
-  });
-
-  // Обработка ошибок подключения
-  bot.on('polling_error', (error) => {
-    console.error('Polling error:', error.message);
+    });
     
-    // Если ошибка связана с DNS или сетью, пробуем переподключиться
-    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-      console.log('Network error detected, attempting to reconnect in 30 seconds...');
-      setTimeout(() => {
-        try {
-          bot.stopPolling();
-          setTimeout(() => {
-            bot.startPolling();
-            console.log('Reconnection attempt completed');
-          }, 5000);
-        } catch (reconnectError) {
-          console.error('Reconnection failed:', reconnectError.message);
+    const webhookUrl = `${BASE_URL}/webhook`;
+    bot.setWebHook(webhookUrl, {
+      allowed_updates: [
+        'message',
+        'edited_message',
+        'callback_query',
+        'inline_query',
+        'chosen_inline_result'
+      ]
+    });
+    
+    console.log(`Webhook установлен на: ${webhookUrl}`);
+  } else {
+    // Конфигурация для polling (разработка)
+    bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
+      polling: {
+        interval: 300,
+        autoStart: false,
+        params: {
+          timeout: 10
         }
-      }, 30000);
+      },
+      webHook: false,
+      request: {
+        timeout: 10000,
+        proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY
+      }
+    });
+
+    // Обработка ошибок подключения для polling
+    bot.on('polling_error', (error) => {
+      console.error('Polling error:', error.message);
+      
+      // Если ошибка связана с DNS или сетью, пробуем переподключиться
+      if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        console.log('Network error detected, attempting to reconnect in 30 seconds...');
+        setTimeout(() => {
+          try {
+            bot.stopPolling();
+            setTimeout(() => {
+              bot.startPolling();
+              console.log('Reconnection attempt completed');
+            }, 5000);
+          } catch (reconnectError) {
+            console.error('Reconnection failed:', reconnectError.message);
+          }
+        }, 30000);
+      }
+    });
+
+    // Запускаем polling только если токен валидный
+    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.length > 10) {
+      bot.startPolling();
+      console.log('Bot polling started successfully');
+    } else {
+      console.warn('Invalid or missing TELEGRAM_BOT_TOKEN, bot not started');
     }
-  });
+  }
 
   bot.on('error', (error) => {
     console.error('Bot error:', error.message);
   });
-
-  // Запускаем polling только если токен валидный
-  if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN.length > 10) {
-    bot.startPolling();
-    console.log('Bot polling started successfully');
-  } else {
-    console.warn('Invalid or missing TELEGRAM_BOT_TOKEN, bot not started');
-  }
 
 } catch (error) {
   console.error('Failed to initialize Telegram bot:', error.message);
@@ -139,8 +171,12 @@ botHandlers.setup(bot);
 
 // Webhook endpoint for Telegram
 app.post('/webhook', (req, res) => {
-  bot.handleUpdate(req.body);
-  res.sendStatus(200);
+  if (bot) {
+    bot.handleUpdate(req.body);
+    res.sendStatus(200);
+  } else {
+    res.sendStatus(500);
+  }
 });
 
 // Health check endpoint
@@ -148,7 +184,9 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    botStatus: bot ? (bot.isPolling() ? 'polling' : 'stopped') : 'not initialized'
+    botStatus: bot ? (bot.isPolling() ? 'polling' : 'webhook') : 'not initialized',
+    environment: process.env.NODE_ENV || 'development',
+    baseUrl: BASE_URL
   });
 });
 
@@ -162,7 +200,8 @@ app.get('*', (req, res) => {
       status: 'Client build not found, but API is working',
       endpoints: {
         health: '/health',
-        api: '/api'
+        api: '/api',
+        webhook: '/webhook'
       }
     });
   }
@@ -178,7 +217,8 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Bot is running...`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Base URL: ${process.env.BASE_URL || 'http://localhost:3000'}`);
+  console.log(`Base URL: ${BASE_URL}`);
+  console.log(`Mode: ${process.env.NODE_ENV === 'production' && process.env.USE_WEBHOOK === 'true' ? 'webhook' : 'polling'}`);
 });
 
 module.exports = app; 
