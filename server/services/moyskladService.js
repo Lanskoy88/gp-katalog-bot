@@ -79,7 +79,7 @@ class MoyskladService {
     try {
       const client = this.createAuthenticatedClient();
       
-      let url = `/entity/product?limit=${limit * 2}&offset=${(page - 1) * limit}`; // Увеличиваем лимит для компенсации фильтрации
+      let url = `/entity/product?limit=${limit}&offset=${(page - 1) * limit}`; // Убираем умножение лимита
       
       // Фильтрация по категории (если указана)
       if (categoryId) {
@@ -139,17 +139,12 @@ class MoyskladService {
         }
       }
       
-      // Применяем пагинацию к отфильтрованным товарам
-      const startIndex = (page - 1) * limit;
-      const endIndex = startIndex + limit;
-      const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
-      
-      console.log(`Получено ${response.data.rows.length} товаров, отфильтровано ${filteredProducts.length}, показано ${paginatedProducts.length}`);
+      console.log(`Получено ${response.data.rows.length} товаров, отфильтровано ${filteredProducts.length}`);
       
       return {
-        products: paginatedProducts,
-        total: filteredProducts.length,
-        hasMore: filteredProducts.length > endIndex
+        products: filteredProducts,
+        total: response.data.meta.size, // Используем общее количество из API
+        hasMore: response.data.rows.length === limit && (page * limit) < response.data.meta.size
       };
     } catch (error) {
       console.error('Error getting products:', error.message);
@@ -296,7 +291,7 @@ class MoyskladService {
     try {
       const client = this.createAuthenticatedClient();
       
-      let url = `/entity/product?limit=${limit * 2}&offset=${(page - 1) * limit}`; // Увеличиваем лимит для компенсации фильтрации
+      let url = `/entity/product?limit=${limit}&offset=${(page - 1) * limit}`; // Убираем умножение лимита
       
       // Фильтрация по категории (если указана)
       if (categoryId) {
@@ -360,15 +355,10 @@ class MoyskladService {
         }
       }
       
-      // Применяем пагинацию к отфильтрованным товарам
-      const startIndex = (page - 1) * limit;
-      const endIndex = startIndex + limit;
-      const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
-      
-      console.log(`Получено ${response.data.rows.length} товаров, отфильтровано ${filteredProducts.length}, показано ${paginatedProducts.length}`);
+      console.log(`Получено ${response.data.rows.length} товаров, отфильтровано ${filteredProducts.length}`);
 
       // Обрабатываем товары с изображениями
-      const productsWithImages = await Promise.all(paginatedProducts.map(async (product) => {
+      const productsWithImages = await Promise.all(filteredProducts.map(async (product) => {
         let imageUrl = null;
         let hasImages = false;
 
@@ -388,15 +378,25 @@ class MoyskladService {
           imageUrl = `/api/images/placeholder/${product.id}`;
         }
 
-        // Получаем цену товара
+        // Получаем цену товара - исправленная логика
         let price = 0;
         try {
+          // Сначала пробуем получить цену через специальный endpoint
           const priceResponse = await client.get(`/entity/product/${product.id}/price`);
           if (priceResponse.data && priceResponse.data.value) {
             price = priceResponse.data.value / 100; // MoySklad хранит цены в копейках
+          } else {
+            // Если нет цены через endpoint, пробуем получить из самого товара
+            if (product.salePrices && product.salePrices.length > 0) {
+              price = product.salePrices[0].value / 100;
+            }
           }
         } catch (priceError) {
-          console.log(`Нет цен для товара ${product.name}`);
+          console.log(`Нет цен для товара ${product.name}, пробуем из самого товара`);
+          // Пробуем получить цену из самого товара
+          if (product.salePrices && product.salePrices.length > 0) {
+            price = product.salePrices[0].value / 100;
+          }
         }
         
         return {
@@ -415,10 +415,10 @@ class MoyskladService {
 
       return {
         products: productsWithImages,
-        total: filteredProducts.length,
+        total: response.data.meta.size, // Используем общее количество из API
         page,
         limit,
-        hasMore: filteredProducts.length > endIndex
+        hasMore: response.data.rows.length === limit && (page * limit) < response.data.meta.size
       };
     } catch (error) {
       console.error('Ошибка при получении товаров с изображениями:', error.message);
@@ -503,14 +503,37 @@ class MoyskladService {
       const categories = await this.getAllCategories(); // Используем все категории для админки
       const settings = this.loadCategorySettings();
       
-      return categories.map(category => ({
-        id: category.id,
-        name: category.name,
-        description: category.description || '',
-        pathName: category.pathName || category.name,
-        productCount: category.productCount || 0,
-        visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
+      // Получаем актуальное количество товаров для каждой категории
+      const categoriesWithProductCount = await Promise.all(categories.map(async (category) => {
+        try {
+          const client = this.createAuthenticatedClient();
+          const response = await client.get(`/entity/product?filter=productFolder.id=${category.id}&limit=1`);
+          const actualProductCount = response.data.meta.size;
+          
+          return {
+            id: category.id,
+            name: category.name,
+            description: category.description || '',
+            pathName: category.pathName || category.name,
+            productCount: actualProductCount,
+            visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
+          };
+        } catch (error) {
+          console.error(`Error getting product count for category ${category.name}:`, error.message);
+          return {
+            id: category.id,
+            name: category.name,
+            description: category.description || '',
+            pathName: category.pathName || category.name,
+            productCount: 0,
+            visible: settings[category.id] !== undefined ? settings[category.id] : true
+          };
+        }
       }));
+      
+      console.log(`Загружено ${categoriesWithProductCount.length} категорий с актуальным количеством товаров`);
+      
+      return categoriesWithProductCount;
     } catch (error) {
       console.error('Error getting category settings:', error.message);
       throw error;
