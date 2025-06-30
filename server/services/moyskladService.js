@@ -193,6 +193,49 @@ class MoyskladService {
     }
   }
 
+  // Вспомогательный метод для получения категорий с подсчётом товаров
+  async fetchCategoriesWithProductCounts(categories) {
+    const client = this.createAuthenticatedClient();
+    
+    // Ограничение параллелизма
+    const maxParallel = 3;
+    const delayMs = 200;
+    let index = 0;
+    async function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+    async function fetchProductCount(category) {
+      try {
+        const url = `/entity/product?filter=productFolder.id=${category.id}&limit=1`;
+        const resp = await client.get(url, {
+          headers: { 'Accept': 'application/json;charset=utf-8' }
+        });
+        const count = resp.data.meta && resp.data.meta.size ? resp.data.meta.size : 0;
+        return count;
+      } catch (e) {
+        console.error(`Ошибка при получении количества товаров для категории ${category.name}:`, e.message);
+        return 0;
+      }
+    }
+
+    async function processQueue() {
+      while (index < categories.length) {
+        const batch = [];
+        for (let i = 0; i < maxParallel && index < categories.length; i++, index++) {
+          batch.push(fetchProductCount(categories[index]));
+        }
+        const counts = await Promise.all(batch);
+        for (let j = 0; j < counts.length; j++) {
+          categories[index - counts.length + j].productCount = counts[j];
+        }
+        if (index < categories.length) await delay(delayMs);
+      }
+      return categories;
+    }
+
+    await processQueue();
+    return categories;
+  }
+
   // Получение видимых категорий (для каталога)
   async getCategories() {
     try {
@@ -209,8 +252,13 @@ class MoyskladService {
         name: category.name,
         description: category.description || '',
         pathName: category.pathName || category.name,
-        productCount: category.productCount || 0
+        productCount: 0 // Заполним позже
       }));
+      
+      console.log(`Загружено ${allCategories.length} категорий (все)`);
+
+      // Получаем количество товаров для всех категорий
+      await this.fetchCategoriesWithProductCounts(allCategories);
       
       // Фильтруем по видимым категориям
       const visibleCategoryIds = this.getVisibleCategoryIds();
@@ -253,11 +301,15 @@ class MoyskladService {
         name: category.name,
         description: category.description || '',
         pathName: category.pathName || category.name,
-        productCount: category.productCount || 0
+        productCount: 0 // Заполним позже
       }));
       
-      console.log(`Загружено ${categories.length} категорий (все):`, categories.map(c => `${c.name} (${c.productCount} товаров)`));
+      console.log(`Загружено ${categories.length} категорий (все)`);
+
+      // Получаем количество товаров для всех категорий
+      await this.fetchCategoriesWithProductCounts(categories);
       
+      console.log(`Категории с количеством товаров:`, categories.map(c => `${c.name} (${c.productCount})`).join(', '));
       return categories;
     } catch (error) {
       console.error('Error getting all categories:', error.message);
