@@ -83,17 +83,14 @@ let bot;
 
 try {
   const isProduction = process.env.NODE_ENV === 'production';
-  const useWebhook = isProduction && process.env.USE_WEBHOOK === 'true';
+  const useWebhook = isProduction; // На Render всегда используем webhook
   
   if (useWebhook) {
-    // Конфигурация для вебхуков в продакшене
+    // Конфигурация для вебхуков в продакшне
     bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
-      webHook: {
-        port: PORT,
-        host: '0.0.0.0'
-      },
+      webHook: false, // Отключаем встроенный webhook
       request: {
-        timeout: 10000,
+        timeout: 30000,
         proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY
       }
     });
@@ -122,7 +119,7 @@ try {
       },
       webHook: false,
       request: {
-        timeout: 10000,
+        timeout: 30000,
         proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY
       }
     });

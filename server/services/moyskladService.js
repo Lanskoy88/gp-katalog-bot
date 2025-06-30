@@ -64,10 +64,13 @@ class MoyskladService {
       baseURL: this.baseURL,
       headers: {
         'Authorization': `Bearer ${this.apiToken}`,
-        'Accept': 'application/json;charset=utf-8',
+        'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
-      timeout: 10000
+      timeout: 30000,
+      validateStatus: function (status) {
+        return status >= 200 && status < 300; // default
+      }
     });
   }
 
