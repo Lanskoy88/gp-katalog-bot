@@ -22,6 +22,17 @@ router.get('/products', async (req, res) => {
   }
 });
 
+// Получение всех категорий (включая скрытые - для админки)
+router.get('/all-categories', async (req, res) => {
+  try {
+    const categories = await moyskladService.getAllCategories();
+    res.json(categories);
+  } catch (error) {
+    console.error('Error in /all-categories:', error);
+    res.status(500).json({ error: 'Failed to fetch all categories' });
+  }
+});
+
 // Получение всех категорий
 router.get('/categories', async (req, res) => {
   try {
@@ -45,6 +56,17 @@ router.get('/category-settings', async (req, res) => {
 });
 
 // Обновление настроек категорий
+router.put('/category-settings', async (req, res) => {
+  try {
+    const result = await moyskladService.updateCategorySettings(req.body.settings);
+    res.json(result);
+  } catch (error) {
+    console.error('Error in PUT /category-settings:', error);
+    res.status(500).json({ error: 'Failed to update category settings' });
+  }
+});
+
+// Обновление настроек категорий (POST для обратной совместимости)
 router.post('/category-settings', async (req, res) => {
   try {
     const result = await moyskladService.updateCategorySettings(req.body);
@@ -206,4 +228,24 @@ router.get('/health', (req, res) => {
   });
 });
 
-module.exports = router; 
+// Сброс настроек категорий
+router.post('/reset-category-settings', async (req, res) => {
+  try {
+    const result = await moyskladService.resetCategorySettings();
+    res.json(result);
+  } catch (error) {
+    console.error('Error in /reset-category-settings:', error);
+    res.status(500).json({ error: 'Failed to reset category settings' });
+  }
+});
+
+module.exports = router; // Сброс настроек категорий
+router.post("/reset-category-settings", async (req, res) => {
+  try {
+    const result = await moyskladService.resetCategorySettings();
+    res.json(result);
+  } catch (error) {
+    console.error("Error in /reset-category-settings:", error);
+    res.status(500).json({ error: "Failed to reset category settings" });
+  }
+});

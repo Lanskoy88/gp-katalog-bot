@@ -1,13 +1,61 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 // In-memory кэш изображений (на уровне модуля)
 const imageCache = new Map();
+
+// Путь к файлу с настройками категорий
+const CATEGORY_SETTINGS_FILE = path.join(__dirname, '../data/category-settings.json');
 
 class MoyskladService {
   constructor() {
     this.baseURL = 'https://api.moysklad.ru/api/remap/1.2';
     this.apiToken = process.env.MOYSKLAD_API_TOKEN;
     this.accountId = process.env.MOYSKLAD_ACCOUNT_ID;
+    
+    // Создаем директорию для данных если её нет
+    this.ensureDataDirectory();
+  }
+
+  // Создание директории для данных
+  ensureDataDirectory() {
+    const dataDir = path.dirname(CATEGORY_SETTINGS_FILE);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+  }
+
+  // Загрузка настроек категорий из файла
+  loadCategorySettings() {
+    try {
+      const settingsFile = path.join(__dirname, '../data/category-settings.json');
+      if (fs.existsSync(settingsFile)) {
+        const data = fs.readFileSync(settingsFile, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (error) {
+      console.error('Error loading category settings:', error.message);
+    }
+    return {};
+  }
+
+  // Сохранение настроек категорий в файл
+  saveCategorySettings(settings) {
+    try {
+      const settingsFile = path.join(__dirname, '../data/category-settings.json');
+      const dataDir = path.dirname(settingsFile);
+      
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      
+      fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+      return true;
+    } catch (error) {
+      console.error('Error saving category settings:', error.message);
+      return false;
+    }
   }
 
   // Создание авторизованного клиента
@@ -58,8 +106,38 @@ class MoyskladService {
     }
   }
 
-  // Получение всех категорий товаров
+  // Получение всех категорий товаров (только видимые)
   async getCategories() {
+    try {
+      const client = this.createAuthenticatedClient();
+      const response = await client.get('/entity/productfolder');
+      
+      // Обрабатываем категории для более удобного использования
+      const allCategories = response.data.rows.map(category => ({
+        id: category.id,
+        name: category.name,
+        description: category.description || '',
+        pathName: category.pathName || category.name,
+        productCount: category.productCount || 0
+      }));
+      
+      // Фильтруем только видимые категории
+      const visibleCategories = allCategories.filter(category => 
+        this.isCategoryVisible(category.id)
+      );
+      
+      console.log(`Загружено ${visibleCategories.length} из ${allCategories.length} категорий (видимые):`, 
+        visibleCategories.map(c => `${c.name} (${c.productCount} товаров)`));
+      
+      return visibleCategories;
+    } catch (error) {
+      console.error('Error getting categories:', error.message);
+      throw error;
+    }
+  }
+
+  // Получение всех категорий товаров (включая скрытые - для админки)
+  async getAllCategories() {
     try {
       const client = this.createAuthenticatedClient();
       const response = await client.get('/entity/productfolder');
@@ -73,11 +151,11 @@ class MoyskladService {
         productCount: category.productCount || 0
       }));
       
-      console.log(`Загружено ${categories.length} категорий:`, categories.map(c => `${c.name} (${c.productCount} товаров)`));
+      console.log(`Загружено ${categories.length} категорий (все):`, categories.map(c => `${c.name} (${c.productCount} товаров)`));
       
       return categories;
     } catch (error) {
-      console.error('Error getting categories:', error.message);
+      console.error('Error getting all categories:', error.message);
       throw error;
     }
   }
@@ -161,6 +239,21 @@ class MoyskladService {
   // Получение товаров с изображениями
   async getProductsWithImages(page = 1, limit = 20, categoryId = null, search = null) {
     try {
+      // Получаем список видимых категорий
+      const visibleCategoryIds = this.getVisibleCategoryIds();
+      
+      // Если указана конкретная категория, проверяем её видимость
+      if (categoryId && !this.isCategoryVisible(categoryId)) {
+        console.log(`Category ${categoryId} is hidden, returning empty result`);
+        return {
+          products: [],
+          total: 0,
+          page,
+          limit,
+          hasMore: false
+        };
+      }
+      
       // Получаем данные из МойСклад
       const productsData = await this.getProducts(page, limit, categoryId, search);
       
@@ -176,8 +269,18 @@ class MoyskladService {
         };
       }
       
+      // Фильтруем товары по видимым категориям (если не указана конкретная категория)
+      let filteredProducts = productsData.products;
+      if (!categoryId && visibleCategoryIds.length > 0) {
+        filteredProducts = productsData.products.filter(product => {
+          const productCategoryId = product.productFolder?.id;
+          return !productCategoryId || this.isCategoryVisible(productCategoryId);
+        });
+        console.log(`Filtered products: ${filteredProducts.length} of ${productsData.products.length} (visible categories: ${visibleCategoryIds.length})`);
+      }
+      
       // Обрабатываем каждый товар
-      const productsWithImages = await Promise.all(productsData.products.map(async (product, index) => {
+      const productsWithImages = await Promise.all(filteredProducts.map(async (product, index) => {
         // Отладочная информация для первого товара
         if (index === 0) {
           console.log('=== ОТЛАДКА ПЕРВОГО ТОВАРА ===');
@@ -238,16 +341,18 @@ class MoyskladService {
           price: price,
           currency: 'RUB',
           imageUrl: imageUrl,
-          hasImages: hasImages
+          hasImages: hasImages,
+          categoryId: product.productFolder?.id || null,
+          categoryName: product.productFolder?.name || null
         };
       }));
 
       return {
         products: productsWithImages,
-        total: productsData.total,
+        total: filteredProducts.length,
         page,
         limit,
-        hasMore: productsData.hasMore
+        hasMore: filteredProducts.length === limit
       };
     } catch (error) {
       console.error('Ошибка при получении товаров с изображениями:', error.message);
@@ -328,14 +433,17 @@ class MoyskladService {
 
   // Получение настроек категорий (какие показывать/скрывать)
   async getCategorySettings() {
-    // В реальном приложении это должно храниться в базе данных
-    // Пока возвращаем все категории как видимые
     try {
-      const categories = await this.getCategories();
+      const categories = await this.getAllCategories(); // Используем все категории для админки
+      const settings = this.loadCategorySettings();
+      
       return categories.map(category => ({
         id: category.id,
         name: category.name,
-        visible: true // По умолчанию все категории видимые
+        description: category.description || '',
+        pathName: category.pathName || category.name,
+        productCount: category.productCount || 0,
+        visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
       }));
     } catch (error) {
       console.error('Error getting category settings:', error.message);
@@ -344,10 +452,26 @@ class MoyskladService {
   }
 
   // Обновление настроек категорий
-  async updateCategorySettings(settings) {
-    // В реальном приложении это должно сохраняться в базе данных
-    console.log('Category settings updated:', settings);
-    return { success: true };
+  async updateCategorySettings(categorySettings) {
+    try {
+      const settings = {};
+      
+      categorySettings.forEach(category => {
+        settings[category.id] = category.visible;
+      });
+      
+      const success = this.saveCategorySettings(settings);
+      
+      if (success) {
+        console.log('Category settings updated successfully');
+        return { success: true, message: 'Настройки успешно сохранены' };
+      } else {
+        throw new Error('Failed to save settings');
+      }
+    } catch (error) {
+      console.error('Error updating category settings:', error.message);
+      throw error;
+    }
   }
 
   // Проверка подключения к API
@@ -366,6 +490,41 @@ class MoyskladService {
         success: false,
         error: error.message
       };
+    }
+  }
+
+  // Получение списка видимых категорий
+  getVisibleCategoryIds() {
+    const settings = this.loadCategorySettings();
+    const visibleIds = [];
+    
+    Object.keys(settings).forEach(categoryId => {
+      if (settings[categoryId]) {
+        visibleIds.push(categoryId);
+      }
+    });
+    
+    return visibleIds;
+  }
+
+  // Проверка видимости категории
+  isCategoryVisible(categoryId) {
+    const settings = this.loadCategorySettings();
+    return settings[categoryId] !== undefined ? settings[categoryId] : true;
+  }
+
+  // Сброс всех настроек категорий (все категории видимые)
+  resetCategorySettings() {
+    try {
+      const settingsFile = path.join(__dirname, '../data/category-settings.json');
+      if (fs.existsSync(settingsFile)) {
+        fs.unlinkSync(settingsFile);
+      }
+      console.log('Category settings reset successfully');
+      return { success: true, message: 'Настройки категорий сброшены' };
+    } catch (error) {
+      console.error('Error resetting category settings:', error.message);
+      throw error;
     }
   }
 }

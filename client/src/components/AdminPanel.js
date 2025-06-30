@@ -97,6 +97,49 @@ const AdminPanel = ({ tg }) => {
     }
   };
 
+  // Сброс настроек категорий
+  const handleResetSettings = async () => {
+    if (!confirm('Вы уверены, что хотите сбросить все настройки категорий? Все категории станут видимыми.')) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await fetch('/api/reset-category-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Ошибка при сбросе настроек');
+      }
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Перезагружаем настройки
+        await loadCategorySettings();
+        
+        if (tg) {
+          tg.showAlert('Настройки категорий сброшены! Все категории теперь видимы.');
+        }
+      } else {
+        throw new Error(result.message || 'Ошибка при сбросе настроек');
+      }
+    } catch (error) {
+      console.error('Error resetting settings:', error);
+      setError('Ошибка при сбросе настроек');
+      
+      if (tg) {
+        tg.showAlert('Ошибка при сбросе настроек');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Отправка данных в Telegram
   useEffect(() => {
     if (tg) {
