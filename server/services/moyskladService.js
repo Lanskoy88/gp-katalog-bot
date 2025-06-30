@@ -96,7 +96,10 @@ class MoyskladService {
       } else {
         // Если категория не указана, фильтруем по видимым категориям
         const visibleCategoryIds = this.getVisibleCategoryIds();
-        if (visibleCategoryIds.length > 0) {
+        if (visibleCategoryIds === null) {
+          // Все категории видимые, не добавляем фильтр
+          console.log('Все категории видимые, загружаем все товары');
+        } else if (visibleCategoryIds.length > 0) {
           const categoryFilter = visibleCategoryIds.map(id => `productFolder.id=${id}`).join(';');
           url += `&filter=${categoryFilter}`;
           console.log(`Фильтруем товары по видимым категориям: ${visibleCategoryIds.length} категорий`);
@@ -123,14 +126,17 @@ class MoyskladService {
       
       if (!categoryId) {
         // Если категория не указана, фильтруем товары по видимым категориям
-        filteredProducts = filteredProducts.filter(product => {
-          const productCategoryId = product.productFolder?.id;
-          if (!productCategoryId) {
-            // Товары без категории показываем только если есть видимые категории
-            return this.getVisibleCategoryIds().length > 0;
-          }
-          return this.isCategoryVisible(productCategoryId);
-        });
+        const visibleCategoryIds = this.getVisibleCategoryIds();
+        if (visibleCategoryIds !== null) { // Только если есть настройки
+          filteredProducts = filteredProducts.filter(product => {
+            const productCategoryId = product.productFolder?.id;
+            if (!productCategoryId) {
+              // Товары без категории показываем только если есть видимые категории
+              return visibleCategoryIds.length > 0;
+            }
+            return this.isCategoryVisible(productCategoryId);
+          });
+        }
       }
       
       // Применяем пагинацию к отфильтрованным товарам
@@ -309,7 +315,10 @@ class MoyskladService {
       } else {
         // Если категория не указана, фильтруем по видимым категориям
         const visibleCategoryIds = this.getVisibleCategoryIds();
-        if (visibleCategoryIds.length > 0) {
+        if (visibleCategoryIds === null) {
+          // Все категории видимые, не добавляем фильтр
+          console.log('Все категории видимые, загружаем все товары');
+        } else if (visibleCategoryIds.length > 0) {
           const categoryFilter = visibleCategoryIds.map(id => `productFolder.id=${id}`).join(';');
           url += `&filter=${categoryFilter}`;
           console.log(`Фильтруем товары по видимым категориям: ${visibleCategoryIds.length} категорий`);
@@ -338,14 +347,17 @@ class MoyskladService {
       
       if (!categoryId) {
         // Если категория не указана, фильтруем товары по видимым категориям
-        filteredProducts = filteredProducts.filter(product => {
-          const productCategoryId = product.productFolder?.id;
-          if (!productCategoryId) {
-            // Товары без категории показываем только если есть видимые категории
-            return this.getVisibleCategoryIds().length > 0;
-          }
-          return this.isCategoryVisible(productCategoryId);
-        });
+        const visibleCategoryIds = this.getVisibleCategoryIds();
+        if (visibleCategoryIds !== null) { // Только если есть настройки
+          filteredProducts = filteredProducts.filter(product => {
+            const productCategoryId = product.productFolder?.id;
+            if (!productCategoryId) {
+              // Товары без категории показываем только если есть видимые категории
+              return visibleCategoryIds.length > 0;
+            }
+            return this.isCategoryVisible(productCategoryId);
+          });
+        }
       }
       
       // Применяем пагинацию к отфильтрованным товарам
@@ -550,20 +562,33 @@ class MoyskladService {
   // Получение списка видимых категорий
   getVisibleCategoryIds() {
     const settings = this.loadCategorySettings();
-    const visibleIds = [];
     
+    // Если файл настроек не существует или пустой, все категории видимые
+    if (!settings || Object.keys(settings).length === 0) {
+      console.log('Файл настроек категорий не найден, все категории видимые');
+      return null; // null означает "все категории видимые"
+    }
+    
+    const visibleIds = [];
     Object.keys(settings).forEach(categoryId => {
       if (settings[categoryId]) {
         visibleIds.push(categoryId);
       }
     });
     
+    console.log(`Найдено ${visibleIds.length} видимых категорий из ${Object.keys(settings).length} настроенных`);
     return visibleIds;
   }
 
   // Проверка видимости категории
   isCategoryVisible(categoryId) {
     const settings = this.loadCategorySettings();
+    
+    // Если файл настроек не существует или пустой, все категории видимые
+    if (!settings || Object.keys(settings).length === 0) {
+      return true;
+    }
+    
     return settings[categoryId] !== undefined ? settings[categoryId] : true;
   }
 
