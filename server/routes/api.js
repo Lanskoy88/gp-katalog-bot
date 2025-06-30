@@ -164,7 +164,7 @@ router.get('/products/:productId/images', async (req, res) => {
         images: images.map(img => {
           console.log(`Обработка изображения:`, JSON.stringify(img, null, 2));
           // MoySklad может использовать разные поля для ID изображения
-          const imageId = img.id || img.meta?.href?.split('/').pop() || img.filename || 'unknown';
+          const imageId = img.id || (img.meta && img.meta.href && img.meta.href.split('/').pop()) || img.filename || 'unknown';
           return {
             id: imageId,
             url: `/api/images/${productId}/${imageId}`

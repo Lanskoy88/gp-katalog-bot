@@ -325,13 +325,13 @@ class MoyskladService {
       const image = images.find(img => {
         // Проверяем различные способы идентификации изображения
         if (img.id === imageId) return true;
-        if (img.meta?.href && img.meta.href.split('/').pop() === imageId) return true;
+        if (img.meta && img.meta.href && img.meta.href.split('/').pop() === imageId) return true;
         // Проверяем по имени файла
         if (img.filename && img.filename.replace(/\.[^/.]+$/, "") === imageId) return true;
         return false;
       });
       
-      if (!image || !image.meta?.downloadHref) {
+      if (!image || !image.meta || !image.meta.downloadHref) {
         return null;
       }
       
@@ -489,7 +489,7 @@ class MoyskladService {
       console.log(`Применяем фильтрацию по ${visibleCategoryIds.length} видимым категориям:`, visibleCategoryIds);
       
       filteredProducts = products.filter(product => {
-        const productCategoryId = product.productFolder?.id;
+        const productCategoryId = product.productFolder && product.productFolder.id;
         if (!productCategoryId) {
           // Товары без категории показываем только если есть видимые категории
           const shouldShow = visibleCategoryIds.length > 0;
@@ -500,7 +500,7 @@ class MoyskladService {
         }
         const isVisible = visibleCategoryIds.includes(productCategoryId);
         if (!isVisible) {
-          console.log(`Скрываем товар из скрытой категории: ${product.name} (категория: ${product.productFolder?.name})`);
+          console.log(`Скрываем товар из скрытой категории: ${product.name} (категория: ${product.productFolder && product.productFolder.name})`);
         }
         return isVisible;
       });
@@ -521,7 +521,7 @@ class MoyskladService {
           const firstImage = images[0];
           // Используем правильный идентификатор изображения
           let imageId = firstImage.id;
-          if (!imageId && firstImage.meta?.href) {
+          if (!imageId && firstImage.meta && firstImage.meta.href) {
             // Извлекаем ID из href
             imageId = firstImage.meta.href.split('/').pop();
           }
@@ -578,8 +578,8 @@ class MoyskladService {
         currency: 'RUB',
         imageUrl: imageUrl,
         hasImages: hasImages,
-        categoryId: product.productFolder?.id || null,
-        categoryName: product.productFolder?.name || null
+        categoryId: product.productFolder && product.productFolder.id || null,
+        categoryName: product.productFolder && product.productFolder.name || null
       };
     }));
 
