@@ -107,7 +107,7 @@ class MoyskladService {
           }
         });
         
-        return await this.processProductsResponse(response, page, limit);
+        return await this.processProductsResponse(response, page, limit, categoryId);
         
       } else {
         // Если категория не указана, фильтруем по видимым категориям
@@ -130,7 +130,7 @@ class MoyskladService {
             }
           });
           
-          return await this.processProductsResponse(response, page, limit);
+          return await this.processProductsResponse(response, page, limit, null);
           
         } else if (visibleCategoryIds.length > 0) {
           // Разбиваем длинные фильтры на несколько запросов
@@ -167,7 +167,7 @@ class MoyskladService {
           
           console.log(`Получено ${allProducts.length} товаров из ${totalCount} всего, показано ${paginatedProducts.length}`);
           
-          return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit);
+          return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit, null);
           
         } else {
           console.log('Нет видимых категорий, возвращаем пустой результат');
@@ -388,7 +388,7 @@ class MoyskladService {
           }
         });
         
-        return await this.processProductsResponse(response, page, limit);
+        return await this.processProductsResponse(response, page, limit, categoryId);
         
       } else {
         // Если категория не указана, фильтруем по видимым категориям
@@ -411,7 +411,7 @@ class MoyskladService {
             }
           });
           
-          return await this.processProductsResponse(response, page, limit);
+          return await this.processProductsResponse(response, page, limit, null);
           
         } else if (visibleCategoryIds.length > 0) {
           // Разбиваем длинные фильтры на несколько запросов
@@ -448,7 +448,7 @@ class MoyskladService {
           
           console.log(`Получено ${allProducts.length} товаров из ${totalCount} всего, показано ${paginatedProducts.length}`);
           
-          return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit);
+          return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit, null);
           
         } else {
           console.log('Нет видимых категорий, возвращаем пустой результат');
@@ -475,16 +475,20 @@ class MoyskladService {
   }
 
   // Вспомогательный метод для обработки ответа с товарами
-  async processProductsResponse(response, page, limit) {
+  async processProductsResponse(response, page, limit, categoryId = null) {
     const products = response.data.rows;
     
     console.log(`Обрабатываем ${products.length} товаров`);
 
-    // Дополнительная фильтрация по видимым категориям
+    // Дополнительная фильтрация по видимым категориям (только если не запрашивается конкретная категория)
     const visibleCategoryIds = this.getVisibleCategoryIds();
     let filteredProducts = products;
     
-    if (visibleCategoryIds !== null) {
+    if (categoryId) {
+      // Если запрашивается конкретная категория, не применяем дополнительную фильтрацию
+      // так как категория уже проверена на видимость в getProductsWithImages
+      console.log(`Запрошена конкретная категория ${categoryId}, дополнительная фильтрация не применяется`);
+    } else if (visibleCategoryIds !== null) {
       // Если есть настройки видимости, фильтруем товары
       console.log(`Применяем фильтрацию по ${visibleCategoryIds.length} видимым категориям:`, visibleCategoryIds);
       
