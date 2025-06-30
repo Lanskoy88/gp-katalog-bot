@@ -53,8 +53,10 @@ router.get('/visible-categories', async (req, res) => {
     res.json({
       categories: categories,
       visibleCount: categories.length,
-      totalVisibleIds: visibleCategoryIds.length,
-      visibleIds: visibleCategoryIds
+      totalVisibleIds: visibleCategoryIds ? visibleCategoryIds.length : 'all',
+      visibleIds: visibleCategoryIds,
+      hasSettings: visibleCategoryIds !== null,
+      message: visibleCategoryIds === null ? 'Все категории видимые' : `Видимых категорий: ${visibleCategoryIds.length}`
     });
   } catch (error) {
     console.error('Error in /visible-categories:', error);
@@ -211,12 +213,20 @@ router.get('/search', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const categories = await moyskladService.getCategories();
+    const allCategories = await moyskladService.getAllCategories();
     const products = await moyskladService.getProducts(1, 1);
+    const visibleCategoryIds = moyskladService.getVisibleCategoryIds();
     
     const stats = {
       categoriesCount: categories.length,
+      allCategoriesCount: allCategories.length,
       productsCount: products.total,
-      lastUpdated: new Date().toISOString()
+      visibleCategoriesCount: visibleCategoryIds ? visibleCategoryIds.length : allCategories.length,
+      hasCategorySettings: visibleCategoryIds !== null,
+      lastUpdated: new Date().toISOString(),
+      message: visibleCategoryIds === null 
+        ? 'Все категории видимые' 
+        : `Видимых категорий: ${visibleCategoryIds.length} из ${allCategories.length}`
     };
     
     res.json(stats);

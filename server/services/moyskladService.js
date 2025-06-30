@@ -480,8 +480,38 @@ class MoyskladService {
     
     console.log(`Обрабатываем ${products.length} товаров`);
 
+    // Дополнительная фильтрация по видимым категориям
+    const visibleCategoryIds = this.getVisibleCategoryIds();
+    let filteredProducts = products;
+    
+    if (visibleCategoryIds !== null) {
+      // Если есть настройки видимости, фильтруем товары
+      console.log(`Применяем фильтрацию по ${visibleCategoryIds.length} видимым категориям:`, visibleCategoryIds);
+      
+      filteredProducts = products.filter(product => {
+        const productCategoryId = product.productFolder?.id;
+        if (!productCategoryId) {
+          // Товары без категории показываем только если есть видимые категории
+          const shouldShow = visibleCategoryIds.length > 0;
+          if (!shouldShow) {
+            console.log(`Скрываем товар без категории: ${product.name}`);
+          }
+          return shouldShow;
+        }
+        const isVisible = visibleCategoryIds.includes(productCategoryId);
+        if (!isVisible) {
+          console.log(`Скрываем товар из скрытой категории: ${product.name} (категория: ${product.productFolder?.name})`);
+        }
+        return isVisible;
+      });
+      
+      console.log(`Отфильтровано ${filteredProducts.length} товаров из ${products.length} по видимым категориям`);
+    } else {
+      console.log('Все категории видимые, фильтрация не применяется');
+    }
+
     // Обрабатываем товары с изображениями
-    const productsWithImages = await Promise.all(products.map(async (product) => {
+    const productsWithImages = await Promise.all(filteredProducts.map(async (product) => {
       let imageUrl = null;
       let hasImages = false;
 
@@ -553,12 +583,14 @@ class MoyskladService {
       };
     }));
 
+    console.log(`Возвращаем ${productsWithImages.length} товаров с изображениями и ценами`);
+
     return {
       products: productsWithImages,
-      total: response.data.meta.size,
+      total: filteredProducts.length, // Исправлено: используем количество отфильтрованных товаров
       page,
       limit,
-      hasMore: response.data.rows.length === limit && (page * limit) < response.data.meta.size
+      hasMore: filteredProducts.length === limit && (page * limit) < filteredProducts.length
     };
   }
 

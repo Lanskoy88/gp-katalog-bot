@@ -51,7 +51,7 @@ export const fetchProducts = async (params = {}) => {
   });
   
   if (categoryId) {
-    queryParams.append('categoryId', categoryId);
+    queryParams.append('category', categoryId);
   }
   
   if (search) {
