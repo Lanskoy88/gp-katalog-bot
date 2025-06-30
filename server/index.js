@@ -85,6 +85,11 @@ try {
   const isProduction = process.env.NODE_ENV === 'production';
   const useWebhook = isProduction; // На Render всегда используем webhook
   
+  console.log('Initializing Telegram bot...');
+  console.log('Environment:', process.env.NODE_ENV);
+  console.log('Use webhook:', useWebhook);
+  console.log('Bot token length:', process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.length : 'NOT SET');
+  
   if (useWebhook) {
     // Конфигурация для вебхуков в продакшне
     bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
@@ -164,34 +169,65 @@ try {
     console.error('Bot error:', error.message);
   });
 
+  console.log('✅ Bot initialized successfully');
+
 } catch (error) {
   console.error('Failed to initialize Telegram bot:', error.message);
   bot = null;
 }
 
 // Bot handlers
+console.log('Setting up bot handlers...');
 botHandlers.setup(bot);
+console.log('Bot handlers setup completed');
+
+// Проверяем, что бот правильно инициализирован
+if (bot) {
+  console.log('Bot instance details:');
+  console.log('- Bot token exists:', !!process.env.TELEGRAM_BOT_TOKEN);
+  console.log('- Bot token length:', process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.length : 'NOT SET');
+  console.log('- Bot methods available:', Object.keys(bot).filter(key => typeof bot[key] === 'function').slice(0, 10));
+  console.log('- Bot has processUpdate method:', typeof bot.processUpdate === 'function');
+  console.log('- Bot has onText method:', typeof bot.onText === 'function');
+} else {
+  console.error('❌ Bot is null - handlers cannot be set up');
+}
 
 // Webhook endpoint for Telegram
 app.post('/webhook', (req, res) => {
   console.log('Webhook received:', {
     method: req.method,
     url: req.url,
-    headers: req.headers,
     body: req.body
   });
   
-  if (bot) {
-    try {
-      bot.handleUpdate(req.body);
-      console.log('✅ Webhook update handled successfully');
-      res.sendStatus(200);
-    } catch (error) {
-      console.error('❌ Error handling webhook update:', error);
-      res.sendStatus(500);
-    }
-  } else {
+  if (!bot) {
     console.error('❌ Bot not initialized, cannot handle webhook');
+    return res.sendStatus(500);
+  }
+  
+  if (!req.body || !req.body.update_id) {
+    console.error('❌ Invalid webhook data received');
+    return res.sendStatus(400);
+  }
+  
+  try {
+    console.log('Processing webhook update with ID:', req.body.update_id);
+    
+    // Проверяем, что у бота есть метод processUpdate
+    if (typeof bot.processUpdate !== 'function') {
+      console.error('❌ Bot does not have processUpdate method');
+      console.log('Available bot methods:', Object.keys(bot).filter(key => typeof bot[key] === 'function'));
+      return res.sendStatus(500);
+    }
+    
+    // Используем правильный метод для обработки обновлений
+    bot.processUpdate(req.body);
+    console.log('✅ Webhook update handled successfully');
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('❌ Error handling webhook update:', error);
+    console.error('Error stack:', error.stack);
     res.sendStatus(500);
   }
 });
