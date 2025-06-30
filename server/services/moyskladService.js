@@ -74,12 +74,10 @@ class MoyskladService {
     });
   }
 
-  // Получение товаров с пагинацией и фильтрацией по видимым категориям
+  // Получение товаров с фильтрацией по видимым категориям
   async getProducts(page = 1, limit = 20, categoryId = null, search = null) {
     try {
       const client = this.createAuthenticatedClient();
-      
-      let url = `/entity/product?limit=${limit}&offset=${(page - 1) * limit}`; // Убираем умножение лимита
       
       // Фильтрация по категории (если указана)
       if (categoryId) {
@@ -89,86 +87,121 @@ class MoyskladService {
           return {
             products: [],
             total: 0,
+            page,
+            limit,
             hasMore: false
           };
         }
-        url += `&filter=productFolder.id=${categoryId}`;
+        
+        let url = `/entity/product?limit=${limit}&offset=${(page - 1) * limit}&filter=productFolder.id=${categoryId}`;
+        
+        // Поиск по названию (если есть)
+        if (search) {
+          url += `&search=${encodeURIComponent(search)}`;
+        }
+
+        console.log('Requesting URL:', url);
+        const response = await client.get(url, {
+          headers: {
+            'Accept': 'application/json;charset=utf-8'
+          }
+        });
+        
+        return await this.processProductsResponse(response, page, limit);
+        
       } else {
         // Если категория не указана, фильтруем по видимым категориям
         const visibleCategoryIds = this.getVisibleCategoryIds();
         if (visibleCategoryIds === null) {
           // Все категории видимые, не добавляем фильтр
           console.log('Все категории видимые, загружаем все товары');
-        } else if (visibleCategoryIds.length > 0) {
-          // Ограничиваем количество категорий в фильтре для избежания ошибок 412
-          const maxCategoriesInFilter = 10; // MoySklad ограничивает длину URL
-          const limitedCategoryIds = visibleCategoryIds.slice(0, maxCategoriesInFilter);
           
-          if (limitedCategoryIds.length < visibleCategoryIds.length) {
-            console.log(`Ограничиваем фильтр до ${maxCategoriesInFilter} категорий из ${visibleCategoryIds.length} для избежания ошибок API`);
+          let url = `/entity/product?limit=${limit}&offset=${(page - 1) * limit}`;
+          
+          // Поиск по названию (если есть)
+          if (search) {
+            url += `&search=${encodeURIComponent(search)}`;
+          }
+
+          console.log('Requesting URL:', url);
+          const response = await client.get(url, {
+            headers: {
+              'Accept': 'application/json;charset=utf-8'
+            }
+          });
+          
+          return await this.processProductsResponse(response, page, limit);
+          
+        } else if (visibleCategoryIds.length > 0) {
+          // Разбиваем длинные фильтры на несколько запросов
+          const maxCategoriesPerRequest = 10; // MoySklad ограничивает длину URL
+          let allProducts = [];
+          let totalCount = 0;
+          
+          for (let i = 0; i < visibleCategoryIds.length; i += maxCategoriesPerRequest) {
+            const categoryBatch = visibleCategoryIds.slice(i, i + maxCategoriesPerRequest);
+            const categoryFilter = categoryBatch.map(id => `productFolder.id=${id}`).join(';');
+            
+            let url = `/entity/product?limit=${limit * 2}&offset=0&filter=${categoryFilter}`;
+            
+            // Поиск по названию (если есть)
+            if (search) {
+              url += `&search=${encodeURIComponent(search)}`;
+            }
+
+            console.log(`Requesting products batch ${Math.floor(i / maxCategoriesPerRequest) + 1}/${Math.ceil(visibleCategoryIds.length / maxCategoriesPerRequest)}`);
+            const response = await client.get(url, {
+              headers: {
+                'Accept': 'application/json;charset=utf-8'
+              }
+            });
+            
+            allProducts = allProducts.concat(response.data.rows);
+            totalCount += response.data.meta.size;
           }
           
-          const categoryFilter = limitedCategoryIds.map(id => `productFolder.id=${id}`).join(';');
-          url += `&filter=${categoryFilter}`;
-          console.log(`Фильтруем товары по видимым категориям: ${limitedCategoryIds.length} категорий`);
+          // Применяем пагинацию к объединенным результатам
+          const startIndex = (page - 1) * limit;
+          const endIndex = startIndex + limit;
+          const paginatedProducts = allProducts.slice(startIndex, endIndex);
+          
+          console.log(`Получено ${allProducts.length} товаров из ${totalCount} всего, показано ${paginatedProducts.length}`);
+          
+          return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit);
+          
         } else {
           console.log('Нет видимых категорий, возвращаем пустой результат');
           return {
             products: [],
             total: 0,
+            page,
+            limit,
             hasMore: false
           };
         }
       }
-      
-      // Поиск по названию (если есть)
-      if (search) {
-        url += `&search=${encodeURIComponent(search)}`;
-      }
-
-      console.log('Requesting URL:', url);
-      const response = await client.get(url);
-      
-      // Дополнительная фильтрация на стороне сервера
-      let filteredProducts = response.data.rows;
-      
-      if (!categoryId) {
-        // Если категория не указана, фильтруем товары по видимым категориям
-        const visibleCategoryIds = this.getVisibleCategoryIds();
-        if (visibleCategoryIds !== null) { // Только если есть настройки
-          filteredProducts = filteredProducts.filter(product => {
-            const productCategoryId = product.productFolder?.id;
-            if (!productCategoryId) {
-              // Товары без категории показываем только если есть видимые категории
-              return visibleCategoryIds.length > 0;
-            }
-            return this.isCategoryVisible(productCategoryId);
-          });
-        }
-      }
-      
-      console.log(`Получено ${response.data.rows.length} товаров, отфильтровано ${filteredProducts.length}`);
-      
-      return {
-        products: filteredProducts,
-        total: response.data.meta.size, // Используем общее количество из API
-        hasMore: response.data.rows.length === limit && (page * limit) < response.data.meta.size
-      };
     } catch (error) {
-      console.error('Error getting products:', error.message);
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-      }
-      throw error;
+      console.error('Ошибка при получении товаров:', error.message);
+      // В случае ошибки возвращаем пустой результат
+      return {
+        products: [],
+        total: 0,
+        page,
+        limit,
+        hasMore: false
+      };
     }
   }
 
-  // Получение всех категорий товаров (только видимые)
+  // Получение видимых категорий (для каталога)
   async getCategories() {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get('/entity/productfolder');
+      const response = await client.get('/entity/productfolder', {
+        headers: {
+          'Accept': 'application/json;charset=utf-8'
+        }
+      });
       
       // Обрабатываем категории для более удобного использования
       const allCategories = response.data.rows.map(category => ({
@@ -179,26 +212,40 @@ class MoyskladService {
         productCount: category.productCount || 0
       }));
       
-      // Фильтруем только видимые категории
-      const visibleCategories = allCategories.filter(category => 
-        this.isCategoryVisible(category.id)
-      );
+      // Фильтруем по видимым категориям
+      const visibleCategoryIds = this.getVisibleCategoryIds();
+      let categories;
       
-      console.log(`Загружено ${visibleCategories.length} из ${allCategories.length} категорий (видимые):`, 
-        visibleCategories.map(c => `${c.name} (${c.productCount} товаров)`));
+      if (visibleCategoryIds === null) {
+        // Все категории видимые
+        categories = allCategories;
+        console.log(`Загружено ${categories.length} категорий (видимые):`, categories.map(c => `${c.name} (${c.productCount} товаров)`));
+      } else if (visibleCategoryIds.length > 0) {
+        // Только видимые категории
+        categories = allCategories.filter(category => visibleCategoryIds.includes(category.id));
+        console.log(`Загружено ${categories.length} из ${allCategories.length} категорий (видимые):`, categories.map(c => `${c.name} (${c.productCount} товаров)`));
+      } else {
+        // Нет видимых категорий
+        categories = [];
+        console.log('Нет видимых категорий, возвращаем пустой результат');
+      }
       
-      return visibleCategories;
+      return categories;
     } catch (error) {
       console.error('Error getting categories:', error.message);
       throw error;
     }
   }
 
-  // Получение всех категорий товаров (включая скрытые - для админки)
+  // Получение всех категорий (для админки)
   async getAllCategories() {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get('/entity/productfolder');
+      const response = await client.get('/entity/productfolder', {
+        headers: {
+          'Accept': 'application/json;charset=utf-8'
+        }
+      });
       
       // Обрабатываем категории для более удобного использования
       const categories = response.data.rows.map(category => ({
@@ -222,7 +269,11 @@ class MoyskladService {
   async getProductById(id) {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get(`/entity/product/${id}`);
+      const response = await client.get(`/entity/product/${id}`, {
+        headers: {
+          'Accept': 'application/json;charset=utf-8'
+        }
+      });
       return response.data;
     } catch (error) {
       console.error('Error getting product by ID:', error.message);
@@ -234,7 +285,11 @@ class MoyskladService {
   async getProductImages(productId) {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get(`/entity/product/${productId}/images`);
+      const response = await client.get(`/entity/product/${productId}/images`, {
+        headers: {
+          'Accept': 'application/json;charset=utf-8'
+        }
+      });
       console.log(`Изображения для товара ${productId}:`, JSON.stringify(response.data, null, 2));
       
       // MoySklad может возвращать изображения в разных форматах
@@ -267,13 +322,19 @@ class MoyskladService {
     try {
       // Получаем список изображений
       const images = await this.getProductImages(productId);
-      const image = images.find(img =>
-        img.id === imageId ||
-        (img.meta?.href && img.meta.href.split('/').pop() === imageId)
-      );
+      const image = images.find(img => {
+        // Проверяем различные способы идентификации изображения
+        if (img.id === imageId) return true;
+        if (img.meta?.href && img.meta.href.split('/').pop() === imageId) return true;
+        // Проверяем по имени файла
+        if (img.filename && img.filename.replace(/\.[^/.]+$/, "") === imageId) return true;
+        return false;
+      });
+      
       if (!image || !image.meta?.downloadHref) {
         return null;
       }
+      
       // Качаем картинку по downloadHref
       const client = this.createAuthenticatedClient();
       const response = await client.get(image.meta.downloadHref, {
@@ -321,7 +382,11 @@ class MoyskladService {
         }
 
         console.log('Requesting products URL:', url);
-        const response = await client.get(url);
+        const response = await client.get(url, {
+          headers: {
+            'Accept': 'application/json;charset=utf-8'
+          }
+        });
         
         return await this.processProductsResponse(response, page, limit);
         
@@ -340,7 +405,11 @@ class MoyskladService {
           }
 
           console.log('Requesting products URL:', url);
-          const response = await client.get(url);
+          const response = await client.get(url, {
+            headers: {
+              'Accept': 'application/json;charset=utf-8'
+            }
+          });
           
           return await this.processProductsResponse(response, page, limit);
           
@@ -362,7 +431,11 @@ class MoyskladService {
             }
 
             console.log(`Requesting products batch ${Math.floor(i / maxCategoriesPerRequest) + 1}/${Math.ceil(visibleCategoryIds.length / maxCategoriesPerRequest)}`);
-            const response = await client.get(url);
+            const response = await client.get(url, {
+              headers: {
+                'Accept': 'application/json;charset=utf-8'
+              }
+            });
             
             allProducts = allProducts.concat(response.data.rows);
             totalCount += response.data.meta.size;
@@ -416,9 +489,25 @@ class MoyskladService {
         const images = await this.getProductImages(product.id);
         if (images && images.length > 0) {
           const firstImage = images[0];
-          imageUrl = `/api/images/${product.id}/${firstImage.id}`;
-          hasImages = true;
-          console.log(`Найдено изображение для товара ${product.name}: ${imageUrl}`);
+          // Используем правильный идентификатор изображения
+          let imageId = firstImage.id;
+          if (!imageId && firstImage.meta?.href) {
+            // Извлекаем ID из href
+            imageId = firstImage.meta.href.split('/').pop();
+          }
+          if (!imageId && firstImage.filename) {
+            // Используем имя файла без расширения
+            imageId = firstImage.filename.replace(/\.[^/.]+$/, "");
+          }
+          
+          if (imageId) {
+            imageUrl = `/api/images/${product.id}/${imageId}`;
+            hasImages = true;
+            console.log(`Найдено изображение для товара ${product.name}: ${imageUrl}`);
+          } else {
+            imageUrl = `/api/images/placeholder/${product.id}`;
+            console.log(`Не удалось определить ID изображения для товара ${product.name}, используем заглушку`);
+          }
         } else {
           imageUrl = `/api/images/placeholder/${product.id}`;
           console.log(`Нет изображений для товара ${product.name}, используем заглушку`);
@@ -537,58 +626,23 @@ class MoyskladService {
     }
   }
 
-  // Получение реального количества товаров в категории
-  async getCategoryProductCount(categoryId) {
-    try {
-      const client = this.createAuthenticatedClient();
-      const response = await client.get(`/entity/product?filter=productFolder.id=${categoryId}&limit=1`);
-      return response.data.meta.size;
-    } catch (error) {
-      console.error(`Error getting product count for category ${categoryId}:`, error.message);
-      return 0;
-    }
-  }
-
   // Получение настроек категорий (какие показывать/скрывать)
   async getCategorySettings() {
     try {
       const categories = await this.getAllCategories(); // Используем все категории для админки
       const settings = this.loadCategorySettings();
       
-      // Получаем реальное количество товаров только для первых 10 категорий для ускорения
-      const categoriesWithSettings = [];
-      const maxCategoriesToCheck = 10;
+      // Используем productCount из самих категорий для ускорения
+      const categoriesWithSettings = categories.map(category => ({
+        id: category.id,
+        name: category.name,
+        description: category.description || '',
+        pathName: category.pathName || category.name,
+        productCount: category.productCount || 0,
+        visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
+      }));
       
-      for (let i = 0; i < categories.length; i++) {
-        const category = categories[i];
-        
-        let productCount = category.productCount || 0;
-        
-        // Получаем реальное количество только для первых категорий
-        if (i < maxCategoriesToCheck) {
-          // Добавляем задержку между запросами для избежания лимитов API
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 50)); // 50ms задержка
-          }
-          
-          try {
-            productCount = await this.getCategoryProductCount(category.id);
-          } catch (error) {
-            console.log(`Не удалось получить количество товаров для категории ${category.name}, используем значение из категории: ${productCount}`);
-          }
-        }
-        
-        categoriesWithSettings.push({
-          id: category.id,
-          name: category.name,
-          description: category.description || '',
-          pathName: category.pathName || category.name,
-          productCount: productCount,
-          visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
-        });
-      }
-      
-      console.log(`Загружено ${categoriesWithSettings.length} категорий (количество товаров обновлено для первых ${maxCategoriesToCheck})`);
+      console.log(`Загружено ${categoriesWithSettings.length} категорий с количеством товаров из MoySklad`);
       
       return categoriesWithSettings;
     } catch (error) {
@@ -620,20 +674,27 @@ class MoyskladService {
     }
   }
 
-  // Проверка подключения к API
+  // Тестирование подключения к MoySklad
   async testConnection() {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get('/entity/product?limit=1');
+      const response = await client.get('/entity/product?limit=1', {
+        headers: {
+          'Accept': 'application/json;charset=utf-8'
+        }
+      });
+      
       return {
         success: true,
-        accountId: this.accountId,
-        productsCount: response.data.meta.size
+        message: 'Подключение к MoySklad успешно',
+        productCount: response.data.meta.size,
+        sampleProduct: response.data.rows[0] ? response.data.rows[0].name : 'Нет товаров'
       };
     } catch (error) {
-      console.error('Error testing connection:', error.message);
+      console.error('Error testing MoySklad connection:', error.message);
       return {
         success: false,
+        message: `Ошибка подключения к MoySklad: ${error.message}`,
         error: error.message
       };
     }
