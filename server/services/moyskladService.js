@@ -537,23 +537,58 @@ class MoyskladService {
     }
   }
 
+  // Получение реального количества товаров в категории
+  async getCategoryProductCount(categoryId) {
+    try {
+      const client = this.createAuthenticatedClient();
+      const response = await client.get(`/entity/product?filter=productFolder.id=${categoryId}&limit=1`);
+      return response.data.meta.size;
+    } catch (error) {
+      console.error(`Error getting product count for category ${categoryId}:`, error.message);
+      return 0;
+    }
+  }
+
   // Получение настроек категорий (какие показывать/скрывать)
   async getCategorySettings() {
     try {
       const categories = await this.getAllCategories(); // Используем все категории для админки
       const settings = this.loadCategorySettings();
       
-      // Используем количество товаров из самих категорий, без дополнительных запросов
-      const categoriesWithSettings = categories.map(category => ({
-        id: category.id,
-        name: category.name,
-        description: category.description || '',
-        pathName: category.pathName || category.name,
-        productCount: category.productCount || 0, // Используем количество из категории
-        visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
-      }));
+      // Получаем реальное количество товаров только для первых 10 категорий для ускорения
+      const categoriesWithSettings = [];
+      const maxCategoriesToCheck = 10;
       
-      console.log(`Загружено ${categoriesWithSettings.length} категорий с настройками`);
+      for (let i = 0; i < categories.length; i++) {
+        const category = categories[i];
+        
+        let productCount = category.productCount || 0;
+        
+        // Получаем реальное количество только для первых категорий
+        if (i < maxCategoriesToCheck) {
+          // Добавляем задержку между запросами для избежания лимитов API
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 50)); // 50ms задержка
+          }
+          
+          try {
+            productCount = await this.getCategoryProductCount(category.id);
+          } catch (error) {
+            console.log(`Не удалось получить количество товаров для категории ${category.name}, используем значение из категории: ${productCount}`);
+          }
+        }
+        
+        categoriesWithSettings.push({
+          id: category.id,
+          name: category.name,
+          description: category.description || '',
+          pathName: category.pathName || category.name,
+          productCount: productCount,
+          visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
+        });
+      }
+      
+      console.log(`Загружено ${categoriesWithSettings.length} категорий (количество товаров обновлено для первых ${maxCategoriesToCheck})`);
       
       return categoriesWithSettings;
     } catch (error) {
