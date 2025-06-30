@@ -96,6 +96,8 @@ try {
     });
     
     const webhookUrl = `${BASE_URL}/webhook`;
+    console.log(`Setting up webhook for URL: ${webhookUrl}`);
+    
     bot.setWebHook(webhookUrl, {
       allowed_updates: [
         'message',
@@ -104,6 +106,10 @@ try {
         'inline_query',
         'chosen_inline_result'
       ]
+    }).then(() => {
+      console.log(`✅ Webhook successfully set to: ${webhookUrl}`);
+    }).catch((error) => {
+      console.error(`❌ Failed to set webhook: ${error.message}`);
     });
     
     console.log(`Webhook установлен на: ${webhookUrl}`);
@@ -168,10 +174,24 @@ botHandlers.setup(bot);
 
 // Webhook endpoint for Telegram
 app.post('/webhook', (req, res) => {
+  console.log('Webhook received:', {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    body: req.body
+  });
+  
   if (bot) {
-    bot.handleUpdate(req.body);
-    res.sendStatus(200);
+    try {
+      bot.handleUpdate(req.body);
+      console.log('✅ Webhook update handled successfully');
+      res.sendStatus(200);
+    } catch (error) {
+      console.error('❌ Error handling webhook update:', error);
+      res.sendStatus(500);
+    }
   } else {
+    console.error('❌ Bot not initialized, cannot handle webhook');
     res.sendStatus(500);
   }
 });

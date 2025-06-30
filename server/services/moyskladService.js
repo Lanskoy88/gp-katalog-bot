@@ -64,7 +64,7 @@ class MoyskladService {
       baseURL: this.baseURL,
       headers: {
         'Authorization': `Bearer ${this.apiToken}`,
-        'Accept': 'application/json',
+        'Accept': 'application/json;charset=utf-8',
         'Content-Type': 'application/json'
       },
       timeout: 30000,
