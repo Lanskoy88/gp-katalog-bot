@@ -44,6 +44,24 @@ router.get('/categories', async (req, res) => {
   }
 });
 
+// Получение информации о видимых категориях
+router.get('/visible-categories', async (req, res) => {
+  try {
+    const categories = await moyskladService.getCategories();
+    const visibleCategoryIds = moyskladService.getVisibleCategoryIds();
+    
+    res.json({
+      categories: categories,
+      visibleCount: categories.length,
+      totalVisibleIds: visibleCategoryIds.length,
+      visibleIds: visibleCategoryIds
+    });
+  } catch (error) {
+    console.error('Error in /visible-categories:', error);
+    res.status(500).json({ error: 'Failed to fetch visible categories info' });
+  }
+});
+
 // Получение настроек категорий
 router.get('/category-settings', async (req, res) => {
   try {
