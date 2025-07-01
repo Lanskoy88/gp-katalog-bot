@@ -24,7 +24,7 @@ api.interceptors.response.use(
     return response.data;
   },
   (error) => {
-    console.error('API Error:', error.config?.url, error.message, error.response?.data);
+          console.error('API Error:', (error.config && error.config.url), error.message, (error.response && error.response.data));
     throw error;
   }
 );
@@ -32,7 +32,7 @@ api.interceptors.response.use(
 // Интерцептор для запросов
 api.interceptors.request.use(
   (config) => {
-    console.log('API Request:', config.method?.toUpperCase(), config.url);
+    console.log('API Request:', (config.method && config.method.toUpperCase()), config.url);
     return config;
   },
   (error) => {

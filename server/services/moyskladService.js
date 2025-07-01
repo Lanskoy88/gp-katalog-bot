@@ -14,6 +14,13 @@ class MoyskladService {
     this.apiToken = process.env.MOYSKLAD_API_TOKEN;
     this.accountId = process.env.MOYSKLAD_ACCOUNT_ID;
     
+    // Отладочная информация
+    console.log('MoyskladService constructor:');
+    console.log('- MOYSKLAD_API_TOKEN exists:', !!process.env.MOYSKLAD_API_TOKEN);
+    console.log('- MOYSKLAD_API_TOKEN length:', process.env.MOYSKLAD_API_TOKEN ? process.env.MOYSKLAD_API_TOKEN.length : 'NOT SET');
+    console.log('- this.apiToken exists:', !!this.apiToken);
+    console.log('- this.apiToken length:', this.apiToken ? this.apiToken.length : 'NOT SET');
+    
     // Создаем директорию для данных если её нет
     this.ensureDataDirectory();
 
@@ -76,6 +83,11 @@ class MoyskladService {
 
   // Создание авторизованного клиента
   createAuthenticatedClient() {
+    console.log('createAuthenticatedClient:');
+    console.log('- this.apiToken exists:', !!this.apiToken);
+    console.log('- this.apiToken length:', this.apiToken ? this.apiToken.length : 'NOT SET');
+    console.log('- Authorization header:', `Bearer ${this.apiToken}`);
+    
     return axios.create({
       baseURL: this.baseURL,
       headers: {
@@ -965,17 +977,17 @@ class MoyskladService {
             data: response.data
           });
           
-          console.log(`✅ ${endpoint.name}: ${response.status} - ${response.data.meta?.size || 'N/A'} записей`);
+          console.log(`✅ ${endpoint.name}: ${response.status} - ${(response.data.meta && response.data.meta.size) || 'N/A'} записей`);
           
         } catch (error) {
           results.push({
             endpoint: endpoint.name,
             status: 'error',
-            statusCode: error.response?.status || 'unknown',
+            statusCode: (error.response && error.response.status) || 'unknown',
             error: error.message
           });
           
-          console.log(`❌ ${endpoint.name}: ${error.response?.status || 'unknown'} - ${error.message}`);
+          console.log(`❌ ${endpoint.name}: ${(error.response && error.response.status) || 'unknown'} - ${error.message}`);
         }
       }
       
@@ -989,8 +1001,8 @@ class MoyskladService {
           return {
             success: true,
             message: 'Подключение к MoySklad успешно',
-            productCount: productEndpoint.data.meta?.size || 0,
-            sampleProduct: productEndpoint.data.rows?.[0]?.name || 'Нет товаров',
+                    productCount: (productEndpoint.data.meta && productEndpoint.data.meta.size) || 0,
+        sampleProduct: (productEndpoint.data.rows && productEndpoint.data.rows[0] && productEndpoint.data.rows[0].name) || 'Нет товаров',
             diagnostics: results
           };
         }

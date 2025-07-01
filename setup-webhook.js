@@ -64,7 +64,7 @@ async function setupWebhook() {
             console.log('📊 Статус вебхука:');
             console.log(`   URL: ${info.url || 'не установлен'}`);
             console.log(`   Ожидающие обновления: ${info.pending_update_count}`);
-            console.log(`   Разрешенные обновления: ${info.allowed_updates?.join(', ') || 'все'}`);
+            console.log(`   Разрешенные обновления: ${(info.allowed_updates && info.allowed_updates.join(', ')) || 'все'}`);
         }
         
     } catch (error) {
@@ -106,7 +106,7 @@ async function getWebhookInfo() {
             console.log('📋 Статус вебхука:');
             console.log(`   URL: ${info.url || 'не установлен'}`);
             console.log(`   Ожидающие обновления: ${info.pending_update_count}`);
-            console.log(`   Разрешенные обновления: ${info.allowed_updates?.join(', ') || 'все'}`);
+            console.log(`   Разрешенные обновления: ${(info.allowed_updates && info.allowed_updates.join(', ')) || 'все'}`);
             console.log(`   Кастомный сертификат: ${info.has_custom_certificate ? 'да' : 'нет'}`);
         }
     } catch (error) {
