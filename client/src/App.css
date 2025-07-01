@@ -69,6 +69,18 @@
   padding: 16px 0;
 }
 
+/* Loading indicator styles */
+.loading-indicator {
+  display: inline-block;
+  margin-left: 8px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .category-filter-header {
   display: flex;
   justify-content: space-between;

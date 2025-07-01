@@ -1,5 +1,12 @@
 import axios from 'axios';
 
+// Простое кэширование
+const cache = {
+  categories: null,
+  categoriesTimestamp: null,
+  cacheTimeout: 5 * 60 * 1000 // 5 минут
+};
+
 // Автоматически определяем базовый URL
 const getBaseURL = () => {
   // В продакшне используем Render URL
@@ -7,14 +14,14 @@ const getBaseURL = () => {
     return 'https://gp-katalog-bot.onrender.com/api';
   }
   
-  // В разработке используем переменную окружения или локальный туннель
-  return process.env.REACT_APP_API_URL || 'https://gp-katalog-images.loca.lt/api';
+  // В разработке используем переменную окружения или Render URL как fallback
+  return process.env.REACT_APP_API_URL || 'https://gp-katalog-bot.onrender.com/api';
 };
 
 // Создаем экземпляр axios с базовым URL
 const api = axios.create({
   baseURL: getBaseURL(),
-  timeout: 10000,
+  timeout: 30000, // Увеличиваем таймаут для Render
 });
 
 // Интерцептор для обработки ошибок
@@ -24,7 +31,13 @@ api.interceptors.response.use(
     return response.data;
   },
   (error) => {
-          console.error('API Error:', (error.config && error.config.url), error.message, (error.response && error.response.data));
+    console.error('API Error:', (error.config && error.config.url), error.message, (error.response && error.response.data));
+    
+    // Добавляем дополнительную информацию об ошибке
+    if (error.code === 'ECONNABORTED') {
+      console.error('Request timeout - возможно, сервер перегружен');
+    }
+    
     throw error;
   }
 );
@@ -43,7 +56,7 @@ api.interceptors.request.use(
 
 // API функции для работы с товарами
 export const fetchProducts = async (params = {}) => {
-  const { page = 1, limit = 100, categoryId, search } = params;
+  const { page = 1, limit = 50, categoryId, search } = params;
   
   const queryParams = new URLSearchParams({
     page: page.toString(),
@@ -63,7 +76,22 @@ export const fetchProducts = async (params = {}) => {
 
 // API функции для работы с категориями
 export const fetchCategories = async () => {
-  return api.get('/categories');
+  // Проверяем кэш
+  const now = Date.now();
+  if (cache.categories && cache.categoriesTimestamp && 
+      (now - cache.categoriesTimestamp) < cache.cacheTimeout) {
+    console.log('📦 Возвращаем категории из кэша');
+    return cache.categories;
+  }
+  
+  console.log('🔄 Загружаем категории с сервера...');
+  const categories = await api.get('/categories');
+  
+  // Сохраняем в кэш
+  cache.categories = categories;
+  cache.categoriesTimestamp = now;
+  
+  return categories;
 };
 
 // API функции для работы с настройками категорий

@@ -23,10 +23,13 @@ const Catalog = ({ tg }) => {
   useEffect(() => {
     const loadCategories = async () => {
       try {
+        console.log('🔄 Загружаем категории...');
         const categoriesData = await fetchCategories();
+        console.log(`✅ Загружено ${categoriesData.length || 0} категорий`);
         setCategories(categoriesData);
       } catch (error) {
-        console.error('Error loading categories:', error);
+        console.error('❌ Error loading categories:', error);
+        // Не показываем ошибку для категорий, так как товары могут загрузиться без них
       }
     };
     loadCategories();
@@ -38,25 +41,42 @@ const Catalog = ({ tg }) => {
       setLoading(true);
       setError(null);
       
+      console.log(`🔄 Загружаем товары: страница ${pageNum}, категория: ${selectedCategory || 'все'}`);
+      
       const productsData = await fetchProducts({
         page: pageNum,
-        limit: 200, // Увеличиваем лимит для загрузки большего количества товаров
+        limit: 50, // Уменьшаем лимит для более быстрой загрузки
         categoryId: selectedCategory || null,
         search: searchQuery || null
       });
 
+      console.log(`✅ Загружено ${productsData.products?.length || 0} товаров`);
+
       if (reset) {
-        setProducts(productsData.products);
+        setProducts(productsData.products || []);
         setPage(1);
       } else {
-        setProducts(prev => [...prev, ...productsData.products]);
+        setProducts(prev => [...prev, ...(productsData.products || [])]);
       }
       
       setHasMore(productsData.hasMore);
       setPage(pageNum + 1);
     } catch (error) {
-      console.error('Error loading products:', error);
-      setError('Ошибка при загрузке товаров');
+      console.error('❌ Error loading products:', error);
+      
+      let errorMessage = 'Ошибка при загрузке товаров';
+      
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        errorMessage = 'Превышено время ожидания. Сервер может быть перегружен. Попробуйте позже.';
+      } else if (error.response?.status === 429) {
+        errorMessage = 'Слишком много запросов. Подождите немного и попробуйте снова.';
+      } else if (error.response?.status >= 500) {
+        errorMessage = 'Ошибка сервера. Попробуйте позже.';
+      } else if (error.message.includes('Network Error')) {
+        errorMessage = 'Ошибка сети. Проверьте подключение к интернету.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -128,7 +148,11 @@ const Catalog = ({ tg }) => {
       {/* Заголовок */}
       <header className="header">
         <div className="container">
-          <h1>Каталог товаров {products.length > 0 && `(${products.length})`}</h1>
+          <h1>
+            Каталог товаров 
+            {loading && <span className="loading-indicator">🔄</span>}
+            {products.length > 0 && `(${products.length})`}
+          </h1>
           
           {/* Поиск */}
           <div className="search-container">

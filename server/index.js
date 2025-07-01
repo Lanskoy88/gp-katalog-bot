@@ -38,7 +38,9 @@ app.use(limiter);
 const corsOrigins = [
   'https://web.telegram.org',
   'http://localhost:3000',
-  'https://gp-katalog.loca.lt'
+  'http://localhost:3002',
+  'https://gp-katalog.loca.lt',
+  'https://gp-katalog-images.loca.lt'
 ];
 
 // Добавляем продакшн домены если они есть
