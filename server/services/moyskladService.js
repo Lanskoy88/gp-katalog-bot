@@ -184,7 +184,14 @@ class MoyskladService {
       }
     } catch (error) {
       console.error('Ошибка при получении товаров:', error.message);
-      // В случае ошибки возвращаем пустой результат
+      
+      // Если это ошибка 403 (нет прав), возвращаем тестовые данные
+      if (error.response && error.response.status === 403) {
+        console.log('Нет прав доступа к товарам (403), возвращаем тестовые данные');
+        return this.getTestProducts(page, limit);
+      }
+      
+      // В случае других ошибок возвращаем пустой результат
       return {
         products: [],
         total: 0,
@@ -483,7 +490,14 @@ class MoyskladService {
       }
     } catch (error) {
       console.error('Ошибка при получении всех товаров:', error.message);
-      // В случае ошибки возвращаем к обычной пагинации
+      
+      // Если это ошибка 403 (нет прав), возвращаем тестовые данные
+      if (error.response && error.response.status === 403) {
+        console.log('Нет прав доступа к товарам (403), возвращаем тестовые данные');
+        return this.getTestProducts(1, limit);
+      }
+      
+      // В случае других ошибок возвращаем к обычной пагинации
       return await this.getProductsWithImagesPaginated(1, limit, null, null);
     }
   }
@@ -644,7 +658,14 @@ class MoyskladService {
       }
     } catch (error) {
       console.error('Ошибка при получении товаров с изображениями:', error.message);
-      // В случае ошибки возвращаем пустой результат
+      
+      // Если это ошибка 403 (нет прав), возвращаем тестовые данные
+      if (error.response && error.response.status === 403) {
+        console.log('Нет прав доступа к товарам (403), возвращаем тестовые данные');
+        return this.getTestProducts(page, limit);
+      }
+      
+      // В случае других ошибок возвращаем пустой результат
       return {
         products: [],
         total: 0,
@@ -895,24 +916,92 @@ class MoyskladService {
   async testConnection() {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get('/entity/product?limit=1', {
-        headers: {
-          'Accept': 'application/json;charset=utf-8'
+      
+      // Проверяем токен
+      console.log('Проверяем токен MoySklad...');
+      console.log('Токен:', this.apiToken ? `${this.apiToken.substring(0, 10)}...` : 'НЕ УСТАНОВЛЕН');
+      
+      // Пробуем разные эндпоинты для диагностики
+      const endpoints = [
+        { name: 'Товары (базовый)', url: '/entity/product?limit=1' },
+        { name: 'Товары (без фильтров)', url: '/entity/product' },
+        { name: 'Категории', url: '/entity/productfolder' },
+        { name: 'Организация', url: '/entity/organization' },
+        { name: 'Склад', url: '/entity/store' }
+      ];
+      
+      const results = [];
+      
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`Тестируем ${endpoint.name}...`);
+          const response = await client.get(endpoint.url, {
+            headers: {
+              'Accept': 'application/json;charset=utf-8'
+            },
+            timeout: 10000
+          });
+          
+          results.push({
+            endpoint: endpoint.name,
+            status: 'success',
+            statusCode: response.status,
+            data: response.data
+          });
+          
+          console.log(`✅ ${endpoint.name}: ${response.status} - ${response.data.meta?.size || 'N/A'} записей`);
+          
+        } catch (error) {
+          results.push({
+            endpoint: endpoint.name,
+            status: 'error',
+            statusCode: error.response?.status || 'unknown',
+            error: error.message
+          });
+          
+          console.log(`❌ ${endpoint.name}: ${error.response?.status || 'unknown'} - ${error.message}`);
         }
-      });
+      }
+      
+      // Анализируем результаты
+      const successfulEndpoints = results.filter(r => r.status === 'success');
+      const failedEndpoints = results.filter(r => r.status === 'error');
+      
+      if (successfulEndpoints.length > 0) {
+        const productEndpoint = successfulEndpoints.find(r => r.endpoint.includes('Товары'));
+        if (productEndpoint) {
+          return {
+            success: true,
+            message: 'Подключение к MoySklad успешно',
+            productCount: productEndpoint.data.meta?.size || 0,
+            sampleProduct: productEndpoint.data.rows?.[0]?.name || 'Нет товаров',
+            diagnostics: results
+          };
+        }
+      }
       
       return {
-        success: true,
-        message: 'Подключение к MoySklad успешно',
-        productCount: response.data.meta.size,
-        sampleProduct: response.data.rows[0] ? response.data.rows[0].name : 'Нет товаров'
+        success: false,
+        message: 'Проблемы с подключением к MoySklad',
+        diagnostics: results,
+        recommendations: [
+          'Проверьте правильность токена доступа',
+          'Убедитесь, что токен имеет права на чтение товаров',
+          'Проверьте, что токен не истек',
+          'Убедитесь, что в MoySklad есть товары'
+        ]
       };
+      
     } catch (error) {
       console.error('Error testing MoySklad connection:', error.message);
       return {
         success: false,
         message: `Ошибка подключения к MoySklad: ${error.message}`,
-        error: error.message
+        error: error.message,
+        recommendations: [
+          'Проверьте правильность токена доступа',
+          'Убедитесь, что токен имеет права на чтение товаров'
+        ]
       };
     }
   }

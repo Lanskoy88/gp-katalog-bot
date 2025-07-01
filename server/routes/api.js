@@ -186,6 +186,20 @@ router.get('/products/:productId/images', async (req, res) => {
   }
 });
 
+// Диагностика подключения к MoySklad
+router.get('/diagnostics', async (req, res) => {
+  try {
+    const diagnostics = await moyskladService.testConnection();
+    res.json(diagnostics);
+  } catch (error) {
+    console.error('Error in /diagnostics:', error);
+    res.status(500).json({ 
+      error: 'Failed to run diagnostics',
+      message: error.message 
+    });
+  }
+});
+
 // Поиск товаров
 router.get('/search', async (req, res) => {
   try {
