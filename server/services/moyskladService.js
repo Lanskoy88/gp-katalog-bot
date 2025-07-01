@@ -80,7 +80,7 @@ class MoyskladService {
       const client = this.createAuthenticatedClient();
       
       // Фильтрация по категории (если указана)
-      if (categoryId) {
+      if (categoryId && categoryId !== 'all') {
         // Проверяем, что запрашиваемая категория видима
         if (!this.isCategoryVisible(categoryId)) {
           console.log(`Категория ${categoryId} скрыта, возвращаем пустой результат`);
@@ -287,6 +287,17 @@ class MoyskladService {
       
       return categories;
     } catch (error) {
+      if (error.response && error.response.status === 403) {
+        console.log('Нет доступа к категориям товаров (403), создаем виртуальную категорию "Все товары"');
+        // Создаем виртуальную категорию "Все товары"
+        return [{
+          id: 'all',
+          name: 'Все товары',
+          description: 'Все доступные товары',
+          pathName: 'Все товары',
+          productCount: 0
+        }];
+      }
       console.error('Error getting categories:', error.message);
       throw error;
     }
@@ -319,6 +330,17 @@ class MoyskladService {
       console.log(`Категории с количеством товаров:`, categories.map(c => `${c.name} (${c.productCount})`).join(', '));
       return categories;
     } catch (error) {
+      if (error.response && error.response.status === 403) {
+        console.log('Нет доступа к категориям товаров (403), создаем виртуальную категорию "Все товары"');
+        // Создаем виртуальную категорию "Все товары"
+        return [{
+          id: 'all',
+          name: 'Все товары',
+          description: 'Все доступные товары',
+          pathName: 'Все товары',
+          productCount: 0
+        }];
+      }
       console.error('Error getting all categories:', error.message);
       throw error;
     }
@@ -918,6 +940,11 @@ class MoyskladService {
 
   // Проверка видимости категории
   isCategoryVisible(categoryId) {
+    // Виртуальная категория "all" всегда видима
+    if (categoryId === 'all') {
+      return true;
+    }
+    
     const settings = this.loadCategorySettings();
     
     // Если файл настроек не существует или пустой, все категории видимые
