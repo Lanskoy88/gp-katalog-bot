@@ -16,6 +16,22 @@ class MoyskladService {
     
     // Создаем директорию для данных если её нет
     this.ensureDataDirectory();
+
+    // Rate limiting settings
+    this.requestQueue = [];
+    this.isProcessing = false;
+    this.lastRequestTime = 0;
+    this.minRequestInterval = 500; // 500ms между запросами (2 запроса/сек)
+    
+    // Retry settings
+    this.maxRetries = 3;
+    this.baseDelay = 1000; // 1 second
+    
+    // Cache settings
+    this.cache = new Map();
+    this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
+    
+    console.log('MoyskladService initialized with rate limiting and retry logic');
   }
 
   // Создание директории для данных
@@ -1057,6 +1073,37 @@ class MoyskladService {
       console.error('Error resetting category settings:', error.message);
       throw error;
     }
+  }
+
+  // Execute request with retry logic
+  async executeRequest(request) {
+    let lastError;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        const response = await request();
+        return response;
+      } catch (error) {
+        lastError = error;
+        // Don't retry on 403 (forbidden) or 401 (unauthorized)
+        if (error.response && (error.response.status === 403 || error.response.status === 401)) {
+          throw error;
+        }
+        // Handle rate limiting (429)
+        if (error.response && error.response.status === 429) {
+          const retryAfter = error.response.headers && error.response.headers['retry-after'] ? parseInt(error.response.headers['retry-after'], 10) : 60;
+          console.log(`Rate limited (429). Waiting ${retryAfter} seconds before retry...`);
+          await this.delay(retryAfter * 1000);
+          continue;
+        }
+        // Exponential backoff for other errors
+        if (attempt < this.maxRetries) {
+          const delay = this.baseDelay * Math.pow(2, attempt);
+          console.log(`Request failed (attempt ${attempt + 1}/${this.maxRetries + 1}). Retrying in ${delay}ms...`);
+          await this.delay(delay);
+        }
+      }
+    }
+    throw lastError;
   }
 }
 
