@@ -2,9 +2,9 @@ import axios from 'axios';
 
 // Автоматически определяем базовый URL
 const getBaseURL = () => {
-  // В продакшне используем текущий домен
+  // В продакшне используем Render URL
   if (process.env.NODE_ENV === 'production') {
-    return `${window.location.origin}/api`;
+    return 'https://gp-katalog-bot.onrender.com/api';
   }
   
   // В разработке используем переменную окружения или локальный туннель
