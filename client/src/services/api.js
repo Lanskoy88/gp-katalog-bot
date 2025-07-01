@@ -43,7 +43,7 @@ api.interceptors.request.use(
 
 // API функции для работы с товарами
 export const fetchProducts = async (params = {}) => {
-  const { page = 1, limit = 20, categoryId, search } = params;
+  const { page = 1, limit = 100, categoryId, search } = params;
   
   const queryParams = new URLSearchParams({
     page: page.toString(),
@@ -81,7 +81,7 @@ export const fetchStats = async () => {
 };
 
 // API функции для поиска
-export const searchProducts = async (query, page = 1, limit = 20) => {
+export const searchProducts = async (query, page = 1, limit = 100) => {
   const queryParams = new URLSearchParams({
     q: query,
     page: page.toString(),

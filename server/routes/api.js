@@ -6,7 +6,7 @@ const router = express.Router();
 // Получение товаров с пагинацией
 router.get('/products', async (req, res) => {
   try {
-    const { page = 1, limit = 20, category, search } = req.query;
+    const { page = 1, limit = 100, category, search } = req.query;
     
     const products = await moyskladService.getProductsWithImages(
       parseInt(page),
@@ -189,7 +189,7 @@ router.get('/products/:productId/images', async (req, res) => {
 // Поиск товаров
 router.get('/search', async (req, res) => {
   try {
-    const { q, page = 1, limit = 20 } = req.query;
+    const { q, page = 1, limit = 100 } = req.query;
     
     if (!q) {
       return res.status(400).json({ error: 'Параметр поиска обязателен' });

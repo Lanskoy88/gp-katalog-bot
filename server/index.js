@@ -16,8 +16,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || 'https://gp-katalog-bot.onrender.com';
 
-// Trust proxy for rate limiting with localtunnel
+// Увеличиваем лимит заголовков для избежания ошибки 431
 app.set('trust proxy', 1);
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Security middleware
 app.use(helmet({
@@ -58,10 +60,6 @@ app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? true : corsOrigins,
   credentials: true
 }));
-
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
 
 // Проверяем существование файлов сборки
 const buildPath = path.join(__dirname, '../client/build');

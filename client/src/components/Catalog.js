@@ -40,6 +40,7 @@ const Catalog = ({ tg }) => {
       
       const productsData = await fetchProducts({
         page: pageNum,
+        limit: 200, // Увеличиваем лимит для загрузки большего количества товаров
         categoryId: selectedCategory || null,
         search: searchQuery || null
       });
@@ -127,7 +128,7 @@ const Catalog = ({ tg }) => {
       {/* Заголовок */}
       <header className="header">
         <div className="container">
-          <h1>Каталог товаров</h1>
+          <h1>Каталог товаров {products.length > 0 && `(${products.length})`}</h1>
           
           {/* Поиск */}
           <div className="search-container">
@@ -171,7 +172,7 @@ const Catalog = ({ tg }) => {
           loader={<LoadingSkeleton count={6} />}
           endMessage={
             <div className="load-more">
-              <p>Все товары загружены</p>
+              <p>Все товары загружены ({products.length} товаров)</p>
             </div>
           }
         >
