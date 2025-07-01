@@ -299,8 +299,28 @@ class MoyskladService {
       
       console.log(`Загружено ${allCategories.length} категорий (все)`);
 
+      // Получаем общее количество товаров
+      let totalProducts = 0;
+      try {
+        const productsResponse = await client.get('/entity/product?limit=1');
+        totalProducts = productsResponse.data.meta && productsResponse.data.meta.size ? productsResponse.data.meta.size : 0;
+        console.log(`Общее количество товаров в системе: ${totalProducts}`);
+      } catch (error) {
+        console.error('Ошибка при получении общего количества товаров:', error.message);
+        totalProducts = 0;
+      }
+
       // Получаем количество товаров для всех категорий
       await this.fetchCategoriesWithProductCounts(allCategories);
+      
+      // Добавляем виртуальную категорию "Все товары" в начало списка
+      const allProductsCategory = {
+        id: 'all',
+        name: 'Все товары',
+        description: 'Все доступные товары',
+        pathName: 'Все товары',
+        productCount: totalProducts
+      };
       
       // Фильтруем по видимым категориям
       const visibleCategoryIds = this.getVisibleCategoryIds();
@@ -308,16 +328,17 @@ class MoyskladService {
       
       if (visibleCategoryIds === null) {
         // Все категории видимые
-        categories = allCategories;
+        categories = [allProductsCategory, ...allCategories];
         console.log(`Загружено ${categories.length} категорий (видимые):`, categories.map(c => `${c.name} (${c.productCount} товаров)`));
       } else if (visibleCategoryIds.length > 0) {
-        // Только видимые категории
-        categories = allCategories.filter(category => visibleCategoryIds.includes(category.id));
+        // Только видимые категории + виртуальная категория "Все товары"
+        const visibleCategories = allCategories.filter(category => visibleCategoryIds.includes(category.id));
+        categories = [allProductsCategory, ...visibleCategories];
         console.log(`Загружено ${categories.length} из ${allCategories.length} категорий (видимые):`, categories.map(c => `${c.name} (${c.productCount} товаров)`));
       } else {
-        // Нет видимых категорий
-        categories = [];
-        console.log('Нет видимых категорий, возвращаем пустой результат');
+        // Нет видимых категорий, но показываем виртуальную категорию "Все товары"
+        categories = [allProductsCategory];
+        console.log('Нет видимых категорий, возвращаем только "Все товары"');
       }
       
       return categories;
@@ -725,12 +746,9 @@ class MoyskladService {
       filteredProducts = products.filter(product => {
         const productCategoryId = product.productFolder && product.productFolder.id;
         if (!productCategoryId) {
-          // Товары без категории показываем только если есть видимые категории
-          const shouldShow = visibleCategoryIds.length > 0;
-          if (!shouldShow) {
-            console.log(`Скрываем товар без категории: ${product.name}`);
-          }
-          return shouldShow;
+          // Товары без категории всегда показываем
+          console.log(`Показываем товар без категории: ${product.name}`);
+          return true;
         }
         const isVisible = visibleCategoryIds.includes(productCategoryId);
         if (!isVisible) {
