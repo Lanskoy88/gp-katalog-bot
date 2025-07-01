@@ -494,11 +494,7 @@ class MoyskladService {
 
   // Получение товаров с изображениями и фильтрацией по видимым категориям
   async getProductsWithImages(page = 1, limit = 100, categoryId = null, search = null) {
-    // Если это первая страница и не указана категория, попробуем загрузить больше товаров
-    if (page === 1 && !categoryId && !search) {
-      return await this.getAllProductsWithImages(limit);
-    }
-    
+    // Убираем специальную логику для первой страницы - используем обычную пагинацию
     return await this.getProductsWithImagesPaginated(page, limit, categoryId, search);
   }
 
