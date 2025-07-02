@@ -169,4 +169,19 @@
 .no-categories p {
   margin: 0;
   font-size: 14px;
+}
+
+/* Search indicator styles */
+.search-indicator {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  animation: pulse 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.search-container {
+  position: relative;
 } 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { Search, Package, Filter } from 'lucide-react';
@@ -6,6 +6,23 @@ import ProductCard from './ProductCard';
 import CategoryFilter from './CategoryFilter';
 import LoadingSkeleton from './LoadingSkeleton';
 import { fetchProducts, fetchCategories } from '../services/api';
+
+// Хук для дебаунса
+const useDebounce = (value, delay) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+};
 
 const Catalog = ({ tg }) => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -18,6 +35,10 @@ const Catalog = ({ tg }) => {
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
   const [showFilters, setShowFilters] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // Дебаунс для поиска (500ms)
+  const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
   // Получение категорий при загрузке
   useEffect(() => {
@@ -38,29 +59,33 @@ const Catalog = ({ tg }) => {
   // Загрузка товаров
   const loadProducts = useCallback(async (pageNum = 1, reset = false) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (reset) {
+        setLoading(true);
+        setError(null);
+      } else {
+        setIsLoadingMore(true);
+      }
       
-      console.log(`🔄 Загружаем товары: страница ${pageNum}, категория: ${selectedCategory || 'все'}`);
+      console.log(`🔄 Загружаем товары: страница ${pageNum}, категория: ${selectedCategory || 'все'}, поиск: ${debouncedSearchQuery || 'нет'}`);
       
       const productsData = await fetchProducts({
         page: pageNum,
-        limit: 50, // Уменьшаем лимит для более быстрой загрузки
+        limit: 20, // Уменьшаем до 20 товаров для более быстрой загрузки
         categoryId: selectedCategory || null,
-        search: searchQuery || null
+        search: debouncedSearchQuery || null
       });
 
       console.log(`✅ Загружено ${productsData.products?.length || 0} товаров`);
 
       if (reset) {
         setProducts(productsData.products || []);
-        setPage(1);
+        setPage(2); // Следующая страница будет 2
       } else {
         setProducts(prev => [...prev, ...(productsData.products || [])]);
+        setPage(pageNum + 1);
       }
       
       setHasMore(productsData.hasMore);
-      setPage(pageNum + 1);
     } catch (error) {
       console.error('❌ Error loading products:', error);
       
@@ -79,13 +104,14 @@ const Catalog = ({ tg }) => {
       setError(errorMessage);
     } finally {
       setLoading(false);
+      setIsLoadingMore(false);
     }
-  }, [selectedCategory, searchQuery]);
+  }, [selectedCategory, debouncedSearchQuery]);
 
-  // Первоначальная загрузка
+  // Первоначальная загрузка и сброс при изменении фильтров
   useEffect(() => {
     loadProducts(1, true);
-  }, [selectedCategory, searchQuery]);
+  }, [selectedCategory, debouncedSearchQuery]);
 
   // Обработка поиска
   const handleSearch = (query) => {
@@ -107,11 +133,11 @@ const Catalog = ({ tg }) => {
   };
 
   // Загрузка следующей страницы
-  const loadMore = () => {
-    if (!loading && hasMore) {
+  const loadMore = useCallback(() => {
+    if (!isLoadingMore && hasMore && !loading) {
       loadProducts(page);
     }
-  };
+  }, [isLoadingMore, hasMore, loading, loadProducts, page]);
 
   // Отправка данных в Telegram
   useEffect(() => {
@@ -120,10 +146,21 @@ const Catalog = ({ tg }) => {
         action: 'catalog_opened',
         productsCount: products.length,
         category: selectedCategory,
-        search: searchQuery
+        search: debouncedSearchQuery
       }));
     }
-  }, [tg, products.length, selectedCategory, searchQuery]);
+  }, [tg, products.length, selectedCategory, debouncedSearchQuery]);
+
+  // Мемоизированный индикатор загрузки
+  const loadingIndicator = useMemo(() => {
+    if (loading) {
+      return <LoadingSkeleton count={6} />;
+    }
+    if (isLoadingMore) {
+      return <LoadingSkeleton count={4} />;
+    }
+    return null;
+  }, [loading, isLoadingMore]);
 
   if (error) {
     return (
@@ -164,6 +201,9 @@ const Catalog = ({ tg }) => {
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
             />
+            {searchQuery !== debouncedSearchQuery && (
+              <span className="search-indicator">🔍</span>
+            )}
           </div>
 
           {/* Кнопка фильтров */}
@@ -193,12 +233,13 @@ const Catalog = ({ tg }) => {
           dataLength={products.length}
           next={loadMore}
           hasMore={hasMore}
-          loader={<LoadingSkeleton count={6} />}
+          loader={loadingIndicator}
           endMessage={
             <div className="load-more">
               <p>Все товары загружены ({products.length} товаров)</p>
             </div>
           }
+          scrollThreshold={0.8}
         >
           <div className="products-grid">
             {products.map((product) => (
@@ -217,8 +258,8 @@ const Catalog = ({ tg }) => {
             <Package size={48} className="empty-state-icon" />
             <h3>Товары не найдены</h3>
             <p>
-              {searchQuery 
-                ? `По запросу "${searchQuery}" ничего не найдено`
+              {debouncedSearchQuery 
+                ? `По запросу "${debouncedSearchQuery}" ничего не найдено`
                 : 'В выбранной категории пока нет товаров'
               }
             </p>
