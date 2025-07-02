@@ -414,16 +414,10 @@ class MoyskladService {
           category.productCount = '~'; // Показываем что товары есть, но количество неизвестно
         });
       } else {
-        console.log(`Слишком много категорий (${allCategories.length}), получаем точное количество для первых 20`);
-        // Получаем точное количество для первых 20 категорий
-        const first20Categories = allCategories.slice(0, 20);
-        await this.fetchCategoriesWithProductCounts(first20Categories);
-        
-        // Для остальных категорий ставим "~" (приблизительное значение)
-        const remainingCategories = allCategories.slice(20);
-        const avgProductsPerCategory = Math.floor(totalProducts / allCategories.length);
-        remainingCategories.forEach(category => {
-          category.productCount = `~${avgProductsPerCategory}`;
+        console.log(`Слишком много категорий (${allCategories.length}), отключаем подсчёт для избежания ошибок 412`);
+        // Отключаем подсчёт для всех категорий
+        allCategories.forEach(category => {
+          category.productCount = '~'; // Показываем что товары есть, но количество неизвестно
         });
       }
       
@@ -516,16 +510,10 @@ class MoyskladService {
           category.productCount = '~'; // Показываем что товары есть, но количество неизвестно
         });
       } else {
-        console.log(`Слишком много категорий (${categories.length}), получаем точное количество для первых 20`);
-        // Получаем точное количество для первых 20 категорий
-        const first20Categories = categories.slice(0, 20);
-        await this.fetchCategoriesWithProductCounts(first20Categories);
-        
-        // Для остальных категорий ставим "~" (приблизительное значение)
-        const remainingCategories = categories.slice(20);
-        const avgProductsPerCategory = Math.floor(810 / categories.length); // Примерное количество
-        remainingCategories.forEach(category => {
-          category.productCount = `~${avgProductsPerCategory}`;
+        console.log(`Слишком много категорий (${categories.length}), отключаем подсчёт для избежания ошибок 412`);
+        // Отключаем подсчёт для всех категорий
+        categories.forEach(category => {
+          category.productCount = '~'; // Показываем что товары есть, но количество неизвестно
         });
       }
       
