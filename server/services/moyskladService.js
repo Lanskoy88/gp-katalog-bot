@@ -111,10 +111,20 @@ class MoyskladService {
 
   // Улучшенная функция выполнения запросов с соблюдением лимитов
   async executeRequest(request) {
+    // Временно отключаем rate limiting для тестирования
+    try {
+      return await request();
+    } catch (error) {
+      throw error;
+    }
+    
+    // Закомментированный код rate limiting
+    /*
     return new Promise((resolve, reject) => {
       this.requestQueue.push({ request, resolve, reject });
       this.processQueue();
     });
+    */
   }
 
   // Обработка очереди запросов с соблюдением лимитов
