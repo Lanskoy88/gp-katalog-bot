@@ -330,51 +330,47 @@ class MoyskladService {
   async fetchCategoriesWithProductCounts(categories) {
     const client = this.createAuthenticatedClient();
     
-    // Ограничение параллелизма для соблюдения лимитов
-    const maxParallel = 2; // Уменьшаем с 2 до 1 для соблюдения лимитов
-    const delayMs = 200; // Увеличиваем задержку
-    let index = 0;
+    // Уменьшаем нагрузку на API - делаем запросы последовательно с большими задержками
+    const delayMs = 500; // Увеличиваем задержку до 500ms
+    let processedCount = 0;
 
-    async function fetchProductCount(category) {
+    for (const category of categories) {
       try {
+        // Добавляем задержку перед каждым запросом
+        if (processedCount > 0) {
+          await this.delay(delayMs);
+        }
+        
         const url = `/entity/product?filter=productFolder.id=${category.id}&limit=1`;
         const resp = await this.executeRequest(() => client.get(url, {
           headers: { 'Accept': 'application/json;charset=utf-8' }
         }));
         const count = resp.data.meta && resp.data.meta.size ? resp.data.meta.size : 0;
-        return count;
+        category.productCount = count;
+        processedCount++;
+        
+        // Логируем прогресс каждые 10 категорий
+        if (processedCount % 10 === 0) {
+          console.log(`Обработано ${processedCount}/${categories.length} категорий`);
+        }
+        
       } catch (e) {
-        // Обработка ошибки 412 (Precondition Failed) - слишком частые запросы
-        if (e.response && e.response.status === 412) {
-          console.log(`Ошибка 412 для категории ${category.name}, возвращаем 0 и продолжаем`);
-          return 0;
+        // Обработка ошибок - возвращаем 0 и продолжаем
+        if (e.response && (e.response.status === 412 || e.response.status === 429)) {
+          console.log(`Ошибка ${e.response.status} для категории ${category.name}, возвращаем 0`);
+          category.productCount = 0;
+        } else {
+          console.error(`Ошибка при получении количества товаров для категории ${category.name}:`, e.message);
+          category.productCount = 0;
         }
-        // Обработка ошибки 429 (Too Many Requests)
-        if (e.response && e.response.status === 429) {
-          console.log(`Ошибка 429 для категории ${category.name}, возвращаем 0 и продолжаем`);
-          return 0;
-        }
-        console.error(`Ошибка при получении количества товаров для категории ${category.name}:`, e.message);
-        return 0;
+        processedCount++;
+        
+        // При ошибках увеличиваем задержку
+        await this.delay(delayMs * 2);
       }
     }
-
-    async function processQueue() {
-      while (index < categories.length) {
-        const batch = [];
-        for (let i = 0; i < maxParallel && index < categories.length; i++, index++) {
-          batch.push(fetchProductCount.call(this, categories[index]));
-        }
-        const counts = await Promise.all(batch);
-        for (let j = 0; j < counts.length; j++) {
-          categories[index - counts.length + j].productCount = counts[j];
-        }
-        if (index < categories.length) await this.delay(delayMs);
-      }
-      return categories;
-    }
-
-    await processQueue.call(this);
+    
+    console.log(`Завершена обработка ${processedCount} категорий`);
     return categories;
   }
 
@@ -410,8 +406,17 @@ class MoyskladService {
         totalProducts = 0;
       }
 
-      // Получаем количество товаров для всех категорий
-      await this.fetchCategoriesWithProductCounts(allCategories);
+      // Получаем количество товаров для всех категорий (с ограничением)
+      if (allCategories.length <= 20) {
+        await this.fetchCategoriesWithProductCounts(allCategories);
+      } else {
+        console.log(`Слишком много категорий (${allCategories.length}), пропускаем получение количества товаров`);
+        // Устанавливаем примерное количество товаров на категорию
+        const avgProductsPerCategory = Math.floor(totalProducts / allCategories.length);
+        allCategories.forEach(category => {
+          category.productCount = avgProductsPerCategory;
+        });
+      }
       
       // Добавляем виртуальную категорию "Все товары" в начало списка
       const allProductsCategory = {
@@ -494,8 +499,16 @@ class MoyskladService {
       
       console.log(`Загружено ${categories.length} категорий (все)`);
 
-      // Получаем количество товаров для всех категорий
-      await this.fetchCategoriesWithProductCounts(categories);
+      // Получаем количество товаров для всех категорий (с ограничением)
+      if (categories.length <= 20) {
+        await this.fetchCategoriesWithProductCounts(categories);
+      } else {
+        console.log(`Слишком много категорий (${categories.length}), пропускаем получение количества товаров`);
+        // Устанавливаем примерное количество товаров на категорию
+        categories.forEach(category => {
+          category.productCount = 0; // Для админки можно показать 0
+        });
+      }
       
       console.log(`Категории с количеством товаров:`, categories.map(c => `${c.name} (${c.productCount})`).join(', '));
       return categories;
