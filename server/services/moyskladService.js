@@ -24,19 +24,26 @@ class MoyskladService {
     // Создаем директорию для данных если её нет
     this.ensureDataDirectory();
 
-    // Rate limiting settings
+    // Rate limiting settings для соблюдения лимитов МойСклад
     this.requestQueue = [];
     this.isProcessing = false;
     this.lastRequestTime = 0;
-    this.minRequestInterval = 500; // 500ms между запросами (2 запроса/сек)
+    this.minRequestInterval = 100; // 100ms между запросами (10 запросов/сек)
+    this.maxConcurrentRequests = 3; // Максимум 3 параллельных запроса
+    this.activeRequests = 0;
     
-    // Retry settings
-    this.maxRetries = 3;
+    // Retry settings с экспоненциальной задержкой
+    this.maxRetries = 5;
     this.baseDelay = 1000; // 1 second
     
     // Cache settings
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
+    
+    // Счетчики для отслеживания лимитов
+    this.requestCount = 0;
+    this.lastResetTime = Date.now();
+    this.error429Count = 0;
     
     console.log('MoyskladService initialized with rate limiting and retry logic');
   }
@@ -102,6 +109,110 @@ class MoyskladService {
     });
   }
 
+  // Улучшенная функция выполнения запросов с соблюдением лимитов
+  async executeRequest(request) {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push({ request, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  // Обработка очереди запросов с соблюдением лимитов
+  async processQueue() {
+    if (this.isProcessing || this.activeRequests >= this.maxConcurrentRequests) {
+      return;
+    }
+
+    this.isProcessing = true;
+
+    while (this.requestQueue.length > 0 && this.activeRequests < this.maxConcurrentRequests) {
+      const { request, resolve, reject } = this.requestQueue.shift();
+      
+      // Проверяем лимиты
+      const now = Date.now();
+      if (now - this.lastResetTime > 3000) { // Сброс счетчика каждые 3 секунды
+        this.requestCount = 0;
+        this.lastResetTime = now;
+      }
+
+      if (this.requestCount >= 45) { // Лимит: 45 запросов за 3 секунды
+        console.log('⚠️ Достигнут лимит запросов, ждем...');
+        await this.delay(3000 - (now - this.lastResetTime));
+        this.requestCount = 0;
+        this.lastResetTime = Date.now();
+      }
+
+      // Соблюдаем минимальный интервал между запросами
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      if (timeSinceLastRequest < this.minRequestInterval) {
+        await this.delay(this.minRequestInterval - timeSinceLastRequest);
+      }
+
+      this.activeRequests++;
+      this.requestCount++;
+      this.lastRequestTime = Date.now();
+
+      // Выполняем запрос с retry логикой
+      this.executeWithRetry(request, resolve, reject);
+    }
+
+    this.isProcessing = false;
+  }
+
+  // Выполнение запроса с retry логикой
+  async executeWithRetry(request, resolve, reject) {
+    let retries = 0;
+    
+    while (retries <= this.maxRetries) {
+      try {
+        const response = await request();
+        this.activeRequests--;
+        resolve(response);
+        return;
+      } catch (error) {
+        this.activeRequests--;
+        
+        if (error.response && error.response.status === 429) {
+          this.error429Count++;
+          console.log(`⚠️ Ошибка 429 (Too Many Requests), попытка ${retries + 1}/${this.maxRetries + 1}`);
+          
+          if (this.error429Count > 200) {
+            console.error('❌ Превышен лимит ошибок 429, приостанавливаем запросы на час');
+            reject(new Error('API rate limit exceeded, too many 429 errors'));
+            return;
+          }
+          
+          // Экспоненциальная задержка для 429 ошибок
+          const delay = Math.min(this.baseDelay * Math.pow(2, retries), 30000);
+          console.log(`⏳ Ждем ${delay}ms перед повторной попыткой...`);
+          await this.delay(delay);
+          retries++;
+          
+        } else if (error.response && error.response.status === 412) {
+          console.log(`⚠️ Ошибка 412 (Precondition Failed), попытка ${retries + 1}/${this.maxRetries + 1}`);
+          
+          // Для 412 ошибок используем меньшую задержку
+          const delay = Math.min(1000 * Math.pow(2, retries), 10000);
+          console.log(`⏳ Ждем ${delay}ms перед повторной попыткой...`);
+          await this.delay(delay);
+          retries++;
+          
+        } else {
+          // Для других ошибок не повторяем
+          reject(error);
+          return;
+        }
+      }
+    }
+    
+    reject(new Error(`Max retries (${this.maxRetries}) exceeded`));
+  }
+
+  // Вспомогательная функция задержки
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   // Получение товаров с фильтрацией по видимым категориям
   async getProducts(page = 1, limit = 100, categoryId = null, search = null) {
     try {
@@ -129,11 +240,11 @@ class MoyskladService {
         }
 
         console.log('Requesting URL:', url);
-        const response = await client.get(url, {
+        const response = await this.executeRequest(() => client.get(url, {
           headers: {
             'Accept': 'application/json;charset=utf-8'
           }
-        });
+        }));
         
         return await this.processProductsResponse(response, page, limit, categoryId);
         
@@ -154,17 +265,17 @@ class MoyskladService {
           }
 
           console.log('Requesting URL:', url);
-          const response = await client.get(url, {
+          const response = await this.executeRequest(() => client.get(url, {
             headers: {
               'Accept': 'application/json;charset=utf-8'
             }
-          });
+          }));
           
           return await this.processProductsResponse(response, page, limit, null);
           
         } else if (visibleCategoryIds.length > 0) {
           // Разбиваем длинные фильтры на несколько запросов
-          const maxCategoriesPerRequest = 10; // MoySklad ограничивает длину URL
+          const maxCategoriesPerRequest = 5; // Уменьшаем для соблюдения лимитов
           let allProducts = [];
           let totalCount = 0;
           
@@ -180,11 +291,11 @@ class MoyskladService {
             }
 
             console.log(`Requesting products batch ${Math.floor(i / maxCategoriesPerRequest) + 1}/${Math.ceil(visibleCategoryIds.length / maxCategoriesPerRequest)}`);
-            const response = await client.get(url, {
+            const response = await this.executeRequest(() => client.get(url, {
               headers: {
                 'Accept': 'application/json;charset=utf-8'
               }
-            });
+            }));
             
             allProducts = allProducts.concat(response.data.rows);
             totalCount += response.data.meta.size;
@@ -198,9 +309,8 @@ class MoyskladService {
           console.log(`Получено ${allProducts.length} товаров из ${totalCount} всего, показано ${paginatedProducts.length}`);
           
           return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit, null);
-          
         } else {
-          console.log('Нет видимых категорий, возвращаем пустой результат');
+          // Нет видимых категорий
           return {
             products: [],
             total: 0,
@@ -211,47 +321,37 @@ class MoyskladService {
         }
       }
     } catch (error) {
-      console.error('Ошибка при получении товаров:', error.message);
-      
-      // Если это ошибка 403 (нет прав), возвращаем тестовые данные
-      if (error.response && error.response.status === 403) {
-        console.log('Нет прав доступа к товарам (403), возвращаем тестовые данные');
-        return this.getTestProducts(page, limit);
-      }
-      
-      // В случае других ошибок возвращаем пустой результат
-      return {
-        products: [],
-        total: 0,
-        page,
-        limit,
-        hasMore: false
-      };
+      console.error('Error in getProducts:', error.message);
+      throw error;
     }
   }
 
-  // Вспомогательный метод для получения категорий с подсчётом товаров
+  // Получение количества товаров для категорий с соблюдением лимитов
   async fetchCategoriesWithProductCounts(categories) {
     const client = this.createAuthenticatedClient();
     
-    // Ограничение параллелизма и увеличенные задержки для избежания ошибок 412
-    const maxParallel = 2;
-    const delayMs = 500;
+    // Ограничение параллелизма для соблюдения лимитов
+    const maxParallel = 2; // Уменьшаем с 2 до 1 для соблюдения лимитов
+    const delayMs = 200; // Увеличиваем задержку
     let index = 0;
-    async function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
 
     async function fetchProductCount(category) {
       try {
         const url = `/entity/product?filter=productFolder.id=${category.id}&limit=1`;
-        const resp = await client.get(url, {
+        const resp = await this.executeRequest(() => client.get(url, {
           headers: { 'Accept': 'application/json;charset=utf-8' }
-        });
+        }));
         const count = resp.data.meta && resp.data.meta.size ? resp.data.meta.size : 0;
         return count;
       } catch (e) {
         // Обработка ошибки 412 (Precondition Failed) - слишком частые запросы
         if (e.response && e.response.status === 412) {
           console.log(`Ошибка 412 для категории ${category.name}, возвращаем 0 и продолжаем`);
+          return 0;
+        }
+        // Обработка ошибки 429 (Too Many Requests)
+        if (e.response && e.response.status === 429) {
+          console.log(`Ошибка 429 для категории ${category.name}, возвращаем 0 и продолжаем`);
           return 0;
         }
         console.error(`Ошибка при получении количества товаров для категории ${category.name}:`, e.message);
@@ -263,18 +363,18 @@ class MoyskladService {
       while (index < categories.length) {
         const batch = [];
         for (let i = 0; i < maxParallel && index < categories.length; i++, index++) {
-          batch.push(fetchProductCount(categories[index]));
+          batch.push(fetchProductCount.call(this, categories[index]));
         }
         const counts = await Promise.all(batch);
         for (let j = 0; j < counts.length; j++) {
           categories[index - counts.length + j].productCount = counts[j];
         }
-        if (index < categories.length) await delay(delayMs);
+        if (index < categories.length) await this.delay(delayMs);
       }
       return categories;
     }
 
-    await processQueue();
+    await processQueue.call(this);
     return categories;
   }
 
@@ -282,11 +382,11 @@ class MoyskladService {
   async getCategories() {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get('/entity/productfolder', {
+      const response = await this.executeRequest(() => client.get('/entity/productfolder', {
         headers: {
           'Accept': 'application/json;charset=utf-8'
         }
-      });
+      }));
       
       // Обрабатываем категории для более удобного использования
       const allCategories = response.data.rows.map(category => ({
@@ -302,7 +402,7 @@ class MoyskladService {
       // Получаем общее количество товаров
       let totalProducts = 0;
       try {
-        const productsResponse = await client.get('/entity/product?limit=1');
+        const productsResponse = await this.executeRequest(() => client.get('/entity/product?limit=1'));
         totalProducts = productsResponse.data.meta && productsResponse.data.meta.size ? productsResponse.data.meta.size : 0;
         console.log(`Общее количество товаров в системе: ${totalProducts}`);
       } catch (error) {
@@ -377,11 +477,11 @@ class MoyskladService {
   async getAllCategories() {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get('/entity/productfolder', {
+      const response = await this.executeRequest(() => client.get('/entity/productfolder', {
         headers: {
           'Accept': 'application/json;charset=utf-8'
         }
-      });
+      }));
       
       // Обрабатываем категории для более удобного использования
       const categories = response.data.rows.map(category => ({
@@ -420,11 +520,11 @@ class MoyskladService {
   async getProductById(id) {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get(`/entity/product/${id}`, {
+      const response = await this.executeRequest(() => client.get(`/entity/product/${id}`, {
         headers: {
           'Accept': 'application/json;charset=utf-8'
         }
-      });
+      }));
       return response.data;
     } catch (error) {
       console.error('Error getting product by ID:', error.message);
@@ -436,11 +536,11 @@ class MoyskladService {
   async getProductImages(productId) {
     try {
       const client = this.createAuthenticatedClient();
-      const response = await client.get(`/entity/product/${productId}/images`, {
+      const response = await this.executeRequest(() => client.get(`/entity/product/${productId}/images`, {
         headers: {
           'Accept': 'application/json;charset=utf-8'
         }
-      });
+      }));
       console.log(`Изображения для товара ${productId}:`, JSON.stringify(response.data, null, 2));
       
       // MoySklad может возвращать изображения в разных форматах
@@ -481,670 +581,467 @@ class MoyskladService {
         if (img.filename && img.filename.replace(/\.[^/.]+$/, "") === imageId) return true;
         return false;
       });
-      
-      if (!image || !image.meta || !image.meta.downloadHref) {
+
+      if (!image) {
+        console.log(`Изображение ${imageId} не найдено для товара ${productId}`);
         return null;
       }
-      
-      // Качаем картинку по downloadHref
+
+      // Получаем бинарные данные изображения
       const client = this.createAuthenticatedClient();
-      const response = await client.get(image.meta.downloadHref, {
+      const imageResponse = await this.executeRequest(() => client.get(`/entity/product/${productId}/images/${imageId}`, {
         responseType: 'arraybuffer',
         headers: {
-          'Accept': 'image/jpeg,image/png,image/*,*/*'
+          'Accept': 'image/*'
         }
-      });
-      const buffer = Buffer.from(response.data);
-      imageCache.set(cacheKey, buffer);
-      return buffer;
-    } catch (error) {
-      if (error.response && (error.response.status === 404 || error.response.status === 429)) {
-        return null;
+      }));
+
+      const imageBuffer = Buffer.from(imageResponse.data);
+      imageCache.set(cacheKey, imageBuffer);
+      
+      // Ограничиваем размер кэша
+      if (imageCache.size > 100) {
+        const firstKey = imageCache.keys().next().value;
+        imageCache.delete(firstKey);
       }
-      console.error(`Ошибка при получении изображения товара ${productId}:`, error.message);
+
+      return imageBuffer;
+    } catch (error) {
+      console.error(`Ошибка при получении изображения ${imageId} для товара ${productId}:`, error.message);
       return null;
     }
   }
 
-  // Получение товаров с изображениями и фильтрацией по видимым категориям
+  // Получение товаров с изображениями
   async getProductsWithImages(page = 1, limit = 100, categoryId = null, search = null) {
-    // Убираем специальную логику для первой страницы - используем обычную пагинацию
-    return await this.getProductsWithImagesPaginated(page, limit, categoryId, search);
-  }
-
-  // Получение всех товаров (для первой страницы)
-  async getAllProductsWithImages(limit = 100) {
     try {
-      const client = this.createAuthenticatedClient();
+      const productsData = await this.getProducts(page, limit, categoryId, search);
       
-      // Сначала получаем общее количество товаров
-      const countResponse = await client.get('/entity/product?limit=1', {
-        headers: {
-          'Accept': 'application/json;charset=utf-8'
+      // Обрабатываем товары для добавления информации о категориях и изображениях
+      const processedProducts = productsData.products.map(product => {
+        // Извлекаем информацию о категории
+        let categoryId = null;
+        let categoryName = null;
+        
+        if (product.productFolder) {
+          categoryId = product.productFolder.meta.href.split('/').pop();
+          categoryName = product.productFolder.name || 'Без названия';
         }
+
+        // Извлекаем цену
+        let price = 0;
+        if (product.salePrices && product.salePrices.length > 0) {
+          // Ищем первую ненулевую цену
+          const nonZeroPrice = product.salePrices.find(p => p.value > 0);
+          if (nonZeroPrice) {
+            price = nonZeroPrice.value / 100; // Цена в копейках
+          }
+        }
+
+        return {
+          id: product.id,
+          name: product.name,
+          code: product.code || '',
+          description: product.description || '',
+          price: price,
+          categoryId: categoryId,
+          categoryName: categoryName,
+          pathName: product.pathName || '',
+          hasImages: product.images && product.images.meta && product.images.meta.size > 0,
+          imageCount: product.images && product.images.meta ? product.images.meta.size : 0,
+          archived: product.archived || false,
+          updated: product.updated || ''
+        };
       });
-      
-      const totalProducts = countResponse.data.meta.size;
-      console.log(`Всего товаров в системе: ${totalProducts}`);
-      
-      // Если товаров меньше 1000, загружаем все сразу
-      if (totalProducts <= 1000) {
-        const increasedLimit = Math.max(limit, 1000);
-        let url = `/entity/product?limit=${increasedLimit}&offset=0`;
-        
-        console.log('Requesting all products URL:', url);
-        const response = await client.get(url, {
-          headers: {
-            'Accept': 'application/json;charset=utf-8'
-          }
-        });
-        
-        console.log(`Загружено ${response.data.rows.length} товаров из ${response.data.meta.size} всего`);
-        
-        return await this.processProductsResponse(response, 1, limit, null);
-      } else {
-        // Если товаров много, загружаем по частям
-        console.log(`Товаров много (${totalProducts}), загружаем по частям`);
-        return await this.loadProductsInBatches(limit, totalProducts);
-      }
-    } catch (error) {
-      console.error('Ошибка при получении всех товаров:', error.message);
-      
-      // Если это ошибка 403 (нет прав), возвращаем тестовые данные
-      if (error.response && error.response.status === 403) {
-        console.log('Нет прав доступа к товарам (403), возвращаем тестовые данные');
-        return this.getTestProducts(1, limit);
-      }
-      
-      // В случае других ошибок возвращаем к обычной пагинации
-      return await this.getProductsWithImagesPaginated(1, limit, null, null);
-    }
-  }
 
-  // Загрузка товаров по частям
-  async loadProductsInBatches(limit, totalProducts) {
-    try {
-      const client = this.createAuthenticatedClient();
-      const batchSize = 500;
-      let allProducts = [];
-      
-      // Загружаем первые несколько партий для первой страницы
-      const batchesToLoad = Math.ceil(limit / batchSize) + 1;
-      
-      for (let i = 0; i < batchesToLoad; i++) {
-        const offset = i * batchSize;
-        const url = `/entity/product?limit=${batchSize}&offset=${offset}`;
-        
-        console.log(`Загружаем партию ${i + 1}/${batchesToLoad}, offset: ${offset}`);
-        const response = await client.get(url, {
-          headers: {
-            'Accept': 'application/json;charset=utf-8'
-          }
-        });
-        
-        allProducts = allProducts.concat(response.data.rows);
-        
-        // Если получили меньше товаров, чем ожидали, значит это последняя партия
-        if (response.data.rows.length < batchSize) {
-          break;
-        }
-        
-        // Небольшая задержка между запросами
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      
-      console.log(`Загружено ${allProducts.length} товаров из ${totalProducts} всего`);
-      
-      return await this.processProductsResponse({ 
-        data: { 
-          rows: allProducts, 
-          meta: { size: totalProducts } 
-        } 
-      }, 1, limit, null);
+      return {
+        products: processedProducts,
+        total: productsData.total,
+        page: productsData.page,
+        limit: productsData.limit,
+        hasMore: productsData.hasMore
+      };
     } catch (error) {
-      console.error('Ошибка при загрузке товаров по частям:', error.message);
+      console.error('Error in getProductsWithImages:', error.message);
       throw error;
     }
   }
 
-  // Получение товаров с изображениями и фильтрацией по видимым категориям (с пагинацией)
-  async getProductsWithImagesPaginated(page = 1, limit = 100, categoryId = null, search = null) {
+  // Получение всех товаров с изображениями (для тестирования)
+  async getAllProductsWithImages(limit = 100) {
     try {
-      const client = this.createAuthenticatedClient();
+      console.log(`Загружаем все товары с лимитом ${limit}...`);
       
-      // Фильтрация по категории (если указана)
-      if (categoryId) {
-        // Проверяем, что запрашиваемая категория видима
-        if (!this.isCategoryVisible(categoryId)) {
-          console.log(`Категория ${categoryId} скрыта, возвращаем пустой результат`);
-          return {
-            products: [],
-            total: 0,
-            page,
-            limit,
-            hasMore: false
-          };
+      const client = this.createAuthenticatedClient();
+      const response = await this.executeRequest(() => client.get(`/entity/product?limit=${limit}`, {
+        headers: {
+          'Accept': 'application/json;charset=utf-8'
         }
+      }));
+      
+      const products = response.data.rows;
+      const totalProducts = response.data.meta.size;
+      
+      console.log(`Получено ${products.length} товаров из ${totalProducts} всего`);
+      
+      // Обрабатываем товары
+      const processedProducts = products.map(product => {
+        // Извлекаем информацию о категории
+        let categoryId = null;
+        let categoryName = null;
         
-        let url = `/entity/product?limit=${limit}&offset=${(page - 1) * limit}&filter=productFolder.id=${categoryId}`;
-        
-        // Поиск по названию (если есть)
-        if (search) {
-          url += `&search=${encodeURIComponent(search)}`;
+        if (product.productFolder) {
+          categoryId = product.productFolder.meta.href.split('/').pop();
+          categoryName = product.productFolder.name || 'Без названия';
         }
 
-        console.log('Requesting products URL:', url);
-        const response = await client.get(url, {
+        // Извлекаем цену
+        let price = 0;
+        if (product.salePrices && product.salePrices.length > 0) {
+          // Ищем первую ненулевую цену
+          const nonZeroPrice = product.salePrices.find(p => p.value > 0);
+          if (nonZeroPrice) {
+            price = nonZeroPrice.value / 100; // Цена в копейках
+          }
+        }
+
+        return {
+          id: product.id,
+          name: product.name,
+          code: product.code || '',
+          description: product.description || '',
+          price: price,
+          categoryId: categoryId,
+          categoryName: categoryName,
+          pathName: product.pathName || '',
+          hasImages: product.images && product.images.meta && product.images.meta.size > 0,
+          imageCount: product.images && product.images.meta ? product.images.meta.size : 0,
+          archived: product.archived || false,
+          updated: product.updated || ''
+        };
+      });
+
+      return {
+        products: processedProducts,
+        total: totalProducts,
+        hasMore: products.length < totalProducts
+      };
+    } catch (error) {
+      console.error('Error in getAllProductsWithImages:', error.message);
+      throw error;
+    }
+  }
+
+  // Загрузка товаров батчами для больших объемов данных
+  async loadProductsInBatches(limit, totalProducts) {
+    const batches = [];
+    const batchSize = Math.min(limit, 100); // Максимум 100 товаров за запрос
+    
+    for (let offset = 0; offset < totalProducts; offset += batchSize) {
+      const currentLimit = Math.min(batchSize, totalProducts - offset);
+      batches.push({ offset, limit: currentLimit });
+    }
+    
+    console.log(`Загружаем ${totalProducts} товаров в ${batches.length} батчах`);
+    
+    const allProducts = [];
+    
+    for (let i = 0; i < batches.length; i++) {
+      const { offset, limit } = batches[i];
+      console.log(`Загружаем батч ${i + 1}/${batches.length} (offset: ${offset}, limit: ${limit})`);
+      
+      try {
+        const client = this.createAuthenticatedClient();
+        const response = await this.executeRequest(() => client.get(`/entity/product?limit=${limit}&offset=${offset}`, {
           headers: {
             'Accept': 'application/json;charset=utf-8'
           }
-        });
+        }));
         
-        return await this.processProductsResponse(response, page, limit, categoryId);
+        allProducts.push(...response.data.rows);
         
-      } else {
-        // Если категория не указана, фильтруем по видимым категориям
-        const visibleCategoryIds = this.getVisibleCategoryIds();
-        if (visibleCategoryIds === null) {
-          // Все категории видимые, загружаем все товары с увеличенным лимитом
-          console.log('Все категории видимые, загружаем все товары');
-          
-          // Увеличиваем лимит для получения большего количества товаров
-          const increasedLimit = Math.max(limit, 500);
-          let url = `/entity/product?limit=${increasedLimit}&offset=${(page - 1) * increasedLimit}`;
-          
-          // Поиск по названию (если есть)
-          if (search) {
-            url += `&search=${encodeURIComponent(search)}`;
-          }
-
-          console.log('Requesting products URL:', url);
-          const response = await client.get(url, {
-            headers: {
-              'Accept': 'application/json;charset=utf-8'
-            }
-          });
-          
-          return await this.processProductsResponse(response, page, limit, null);
-          
-        } else if (visibleCategoryIds.length > 0) {
-          // Разбиваем длинные фильтры на несколько запросов
-          const maxCategoriesPerRequest = 10; // MoySklad ограничивает длину URL
-          let allProducts = [];
-          let totalCount = 0;
-          
-          for (let i = 0; i < visibleCategoryIds.length; i += maxCategoriesPerRequest) {
-            const categoryBatch = visibleCategoryIds.slice(i, i + maxCategoriesPerRequest);
-            const categoryFilter = categoryBatch.map(id => `productFolder.id=${id}`).join(';');
-            
-            let url = `/entity/product?limit=${limit * 2}&offset=0&filter=${categoryFilter}`;
-            
-            // Поиск по названию (если есть)
-            if (search) {
-              url += `&search=${encodeURIComponent(search)}`;
-            }
-
-            console.log(`Requesting products batch ${Math.floor(i / maxCategoriesPerRequest) + 1}/${Math.ceil(visibleCategoryIds.length / maxCategoriesPerRequest)}`);
-            const response = await client.get(url, {
-              headers: {
-                'Accept': 'application/json;charset=utf-8'
-              }
-            });
-            
-            allProducts = allProducts.concat(response.data.rows);
-            totalCount += response.data.meta.size;
-          }
-          
-          // Применяем пагинацию к объединенным результатам
-          const startIndex = (page - 1) * limit;
-          const endIndex = startIndex + limit;
-          const paginatedProducts = allProducts.slice(startIndex, endIndex);
-          
-          console.log(`Получено ${allProducts.length} товаров из ${totalCount} всего, показано ${paginatedProducts.length}`);
-          
-          return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit, null);
-          
-        } else {
-          console.log('Нет видимых категорий, возвращаем пустой результат');
-          return {
-            products: [],
-            total: 0,
-            page,
-            limit,
-            hasMore: false
-          };
+        // Небольшая задержка между батчами
+        if (i < batches.length - 1) {
+          await this.delay(100);
         }
+      } catch (error) {
+        console.error(`Ошибка при загрузке батча ${i + 1}:`, error.message);
+        // Продолжаем с следующим батчем
       }
+    }
+    
+    return allProducts;
+  }
+
+  // Получение товаров с изображениями с пагинацией
+  async getProductsWithImagesPaginated(page = 1, limit = 100, categoryId = null, search = null) {
+    try {
+      console.log(`Загружаем товары: страница ${page}, лимит ${limit}, категория: ${categoryId || 'все'}, поиск: ${search || 'нет'}`);
+      
+      const productsData = await this.getProductsWithImages(page, limit, categoryId, search);
+      
+      console.log(`Получено ${productsData.products.length} товаров из ${productsData.total} всего`);
+      
+      return productsData;
     } catch (error) {
-      console.error('Ошибка при получении товаров с изображениями:', error.message);
-      
-      // Если это ошибка 403 (нет прав), возвращаем тестовые данные
-      if (error.response && error.response.status === 403) {
-        console.log('Нет прав доступа к товарам (403), возвращаем тестовые данные');
-        return this.getTestProducts(page, limit);
-      }
-      
-      // В случае других ошибок возвращаем пустой результат
-      return {
-        products: [],
-        total: 0,
-        page,
-        limit,
-        hasMore: false
-      };
+      console.error('Error in getProductsWithImagesPaginated:', error.message);
+      throw error;
     }
   }
 
-  // Вспомогательный метод для обработки ответа с товарами
+  // Обработка ответа с товарами
   async processProductsResponse(response, page, limit, categoryId = null) {
-    const products = response.data.rows;
-    
-    console.log(`Обрабатываем ${products.length} товаров`);
-
-    // Дополнительная фильтрация по видимым категориям (только если не запрашивается конкретная категория)
-    const visibleCategoryIds = this.getVisibleCategoryIds();
-    let filteredProducts = products;
-    
-    if (categoryId) {
-      // Если запрашивается конкретная категория, не применяем дополнительную фильтрацию
-      // так как категория уже проверена на видимость в getProductsWithImages
-      console.log(`Запрошена конкретная категория ${categoryId}, дополнительная фильтрация не применяется`);
-    } else if (visibleCategoryIds !== null) {
-      // Если есть настройки видимости, фильтруем товары
-      console.log(`Применяем фильтрацию по ${visibleCategoryIds.length} видимым категориям:`, visibleCategoryIds);
+    try {
+      const products = response.data.rows || [];
+      const total = response.data.meta && response.data.meta.size ? response.data.meta.size : products.length;
       
-      filteredProducts = products.filter(product => {
-        const productCategoryId = product.productFolder && product.productFolder.id;
-        if (!productCategoryId) {
-          // Товары без категории всегда показываем
-          console.log(`Показываем товар без категории: ${product.name}`);
-          return true;
-        }
-        const isVisible = visibleCategoryIds.includes(productCategoryId);
-        if (!isVisible) {
-          console.log(`Скрываем товар из скрытой категории: ${product.name} (категория: ${product.productFolder && product.productFolder.name})`);
-        }
-        return isVisible;
-      });
+      console.log(`Обрабатываем ${products.length} товаров из ${total} всего`);
       
-      console.log(`Отфильтровано ${filteredProducts.length} товаров из ${products.length} по видимым категориям`);
-    } else {
-      console.log('Все категории видимые, фильтрация не применяется');
-    }
-
-    // Обрабатываем товары с изображениями
-    const productsWithImages = await Promise.all(filteredProducts.map(async (product) => {
-      let imageUrl = null;
-      let hasImages = false;
-
-      try {
-        const images = await this.getProductImages(product.id);
-        if (images && images.length > 0) {
-          const firstImage = images[0];
-          // Используем правильный идентификатор изображения
-          let imageId = firstImage.id;
-          if (!imageId && firstImage.meta && firstImage.meta.href) {
-            // Извлекаем ID из href
-            imageId = firstImage.meta.href.split('/').pop();
-          }
-          if (!imageId && firstImage.filename) {
-            // Используем имя файла без расширения
-            imageId = firstImage.filename.replace(/\.[^/.]+$/, "");
-          }
-          
-          if (imageId) {
-            imageUrl = `/api/images/${product.id}/${imageId}`;
-            hasImages = true;
-            console.log(`Найдено изображение для товара ${product.name}: ${imageUrl}`);
-          } else {
-            imageUrl = `/api/images/placeholder/${product.id}`;
-            console.log(`Не удалось определить ID изображения для товара ${product.name}, используем заглушку`);
-          }
-        } else {
-          imageUrl = `/api/images/placeholder/${product.id}`;
-          console.log(`Нет изображений для товара ${product.name}, используем заглушку`);
+      // Обрабатываем товары для добавления информации о категориях
+      const processedProducts = products.map(product => {
+        // Извлекаем информацию о категории
+        let categoryId = null;
+        let categoryName = null;
+        
+        if (product.productFolder) {
+          categoryId = product.productFolder.meta.href.split('/').pop();
+          categoryName = product.productFolder.name || 'Без названия';
         }
-      } catch (imageError) {
-        console.error(`Ошибка при получении изображений для товара ${product.name}:`, imageError.message);
-        imageUrl = `/api/images/placeholder/${product.id}`;
-      }
 
-      // Получаем цену товара - исправленная логика
-      let price = 0;
-      try {
-        // Сначала пробуем получить цену через специальный endpoint
-        const client = this.createAuthenticatedClient();
-        const priceResponse = await client.get(`/entity/product/${product.id}/price`);
-        if (priceResponse.data && priceResponse.data.value) {
-          price = priceResponse.data.value / 100; // MoySklad хранит цены в копейках
-        } else {
-          // Если нет цены через endpoint, пробуем получить из самого товара
-          if (product.salePrices && product.salePrices.length > 0) {
-            price = product.salePrices[0].value / 100;
-          }
-        }
-      } catch (priceError) {
-        console.log(`Нет цен для товара ${product.name}, пробуем из самого товара`);
-        // Пробуем получить цену из самого товара
+        // Извлекаем цену
+        let price = 0;
         if (product.salePrices && product.salePrices.length > 0) {
-          price = product.salePrices[0].value / 100;
+          // Ищем первую ненулевую цену
+          const nonZeroPrice = product.salePrices.find(p => p.value > 0);
+          if (nonZeroPrice) {
+            price = nonZeroPrice.value / 100; // Цена в копейках
+          }
         }
-      }
+
+        return {
+          id: product.id,
+          name: product.name,
+          code: product.code || '',
+          description: product.description || '',
+          price: price,
+          categoryId: categoryId,
+          categoryName: categoryName,
+          pathName: product.pathName || '',
+          hasImages: product.images && product.images.meta && product.images.meta.size > 0,
+          imageCount: product.images && product.images.meta ? product.images.meta.size : 0,
+          archived: product.archived || false,
+          updated: product.updated || ''
+        };
+      });
+
+      const hasMore = (page * limit) < total;
       
       return {
-        id: product.id,
-        name: product.name,
-        description: product.description || '',
-        code: product.code || '',
-        price: price,
-        currency: 'RUB',
-        imageUrl: imageUrl,
-        hasImages: hasImages,
-        categoryId: product.productFolder && product.productFolder.id || null,
-        categoryName: product.productFolder && product.productFolder.name || null
+        products: processedProducts,
+        total: total,
+        page: page,
+        limit: limit,
+        hasMore: hasMore
       };
-    }));
-
-    console.log(`Возвращаем ${productsWithImages.length} товаров с изображениями и ценами`);
-
-    return {
-      products: productsWithImages,
-      total: response.data.meta.size, // Используем общее количество товаров из API
-      page,
-      limit,
-      hasMore: productsWithImages.length === limit && (page * limit) < response.data.meta.size
-    };
+    } catch (error) {
+      console.error('Error in processProductsResponse:', error.message);
+      throw error;
+    }
   }
 
-  // Создание тестовых данных для демонстрации
+  // Тестовые данные для разработки
   getTestProducts(page = 1, limit = 20) {
-    const testProducts = [
-      {
-        id: 'test-1',
-        name: 'Тестовый товар 1',
-        description: 'Описание тестового товара 1',
-        price: 1000,
-        imageUrl: '/api/images/placeholder/test-1'
-      },
-      {
-        id: 'test-2', 
-        name: 'Тестовый товар 2',
-        description: 'Описание тестового товара 2',
-        price: 2000,
-        imageUrl: '/api/images/placeholder/test-2'
-      },
-      {
-        id: 'test-3',
-        name: 'Тестовый товар 3', 
-        description: 'Описание тестового товара 3',
-        price: 1500,
-        imageUrl: '/api/images/placeholder/test-3'
-      }
-    ];
-
+    const testProducts = [];
     const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedProducts = testProducts.slice(startIndex, endIndex);
-
+    
+    for (let i = 0; i < limit; i++) {
+      const productIndex = startIndex + i;
+      testProducts.push({
+        id: `test-${productIndex}`,
+        name: `Тестовый товар ${productIndex + 1}`,
+        code: `TEST-${productIndex + 1}`,
+        description: `Описание тестового товара ${productIndex + 1}`,
+        price: Math.floor(Math.random() * 1000) + 100,
+        categoryId: `category-${Math.floor(Math.random() * 5) + 1}`,
+        categoryName: `Категория ${Math.floor(Math.random() * 5) + 1}`,
+        pathName: `Тестовая категория ${Math.floor(Math.random() * 5) + 1}`,
+        hasImages: Math.random() > 0.5,
+        imageCount: Math.floor(Math.random() * 3),
+        archived: false,
+        updated: new Date().toISOString()
+      });
+    }
+    
     return {
-      products: paginatedProducts,
-      total: testProducts.length,
-      page,
-      limit
+      products: testProducts,
+      total: 100,
+      page: page,
+      limit: limit,
+      hasMore: (page * limit) < 100
     };
   }
 
   // Получение заглушки изображения
   async getPlaceholderImage(productId) {
     try {
-      console.log('Creating placeholder for productId:', productId);
+      // Создаем SVG заглушку с названием товара
+      const svg = `
+        <svg width="300" height="200" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100%" height="100%" fill="#f3f4f6"/>
+          <text x="50%" y="50%" font-family="Arial, sans-serif" font-size="14" fill="#6b7280" text-anchor="middle" dy=".3em">
+            Изображение товара
+          </text>
+          <text x="50%" y="70%" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af" text-anchor="middle" dy=".3em">
+            ID: ${productId}
+          </text>
+        </svg>
+      `;
       
-      // Создаём простую SVG заглушку
-      const svgPlaceholder = `<svg width="300" height="300" xmlns="http://www.w3.org/2000/svg">
-        <rect width="300" height="300" fill="#4A90E2"/>
-        <text x="150" y="150" font-family="Arial, sans-serif" font-size="24" fill="white" text-anchor="middle" dy=".3em">Товар</text>
-        <text x="150" y="180" font-family="Arial, sans-serif" font-size="12" fill="white" text-anchor="middle">ID: ${productId.substring(0, 8)}</text>
-      </svg>`;
-      
-      const buffer = Buffer.from(svgPlaceholder, 'utf-8');
-      console.log('Created placeholder buffer, size:', buffer.length);
-      return buffer;
+      return Buffer.from(svg, 'utf-8');
     } catch (error) {
-      console.error(`Ошибка при создании заглушки для товара ${productId}:`, error.message);
-      // Возвращаем простую заглушку в случае ошибки
-      const fallbackSvg = `<svg width="300" height="300" xmlns="http://www.w3.org/2000/svg">
-        <rect width="300" height="300" fill="#cccccc"/>
-        <text x="150" y="150" font-family="Arial, sans-serif" font-size="24" fill="white" text-anchor="middle" dy=".3em">Нет фото</text>
-      </svg>`;
-      return Buffer.from(fallbackSvg, 'utf-8');
+      console.error('Error creating placeholder image:', error.message);
+      return null;
     }
   }
 
-  // Получение настроек категорий (какие показывать/скрывать)
+  // Получение настроек категорий
   async getCategorySettings() {
     try {
-      const categories = await this.getAllCategories(); // Используем все категории для админки
       const settings = this.loadCategorySettings();
-      
-      // Используем productCount из самих категорий для ускорения
-      const categoriesWithSettings = categories.map(category => ({
-        id: category.id,
-        name: category.name,
-        description: category.description || '',
-        pathName: category.pathName || category.name,
-        productCount: category.productCount || 0,
-        visible: settings[category.id] !== undefined ? settings[category.id] : true // По умолчанию все категории видимые
-      }));
-      
-      console.log(`Загружено ${categoriesWithSettings.length} категорий с количеством товаров из MoySklad`);
-      
-      return categoriesWithSettings;
+      console.log('Loaded category settings:', settings);
+      return settings;
     } catch (error) {
       console.error('Error getting category settings:', error.message);
-      throw error;
+      return {};
     }
   }
 
   // Обновление настроек категорий
   async updateCategorySettings(categorySettings) {
     try {
-      const settings = {};
-      
-      categorySettings.forEach(category => {
-        settings[category.id] = category.visible;
-      });
-      
-      const success = this.saveCategorySettings(settings);
+      console.log('Updating category settings:', categorySettings);
+      const success = this.saveCategorySettings(categorySettings);
       
       if (success) {
         console.log('Category settings updated successfully');
-        return { success: true, message: 'Настройки успешно сохранены' };
+        return { success: true, message: 'Настройки категорий обновлены' };
       } else {
-        throw new Error('Failed to save settings');
+        console.error('Failed to save category settings');
+        return { success: false, message: 'Ошибка при сохранении настроек' };
       }
     } catch (error) {
       console.error('Error updating category settings:', error.message);
-      throw error;
+      return { success: false, message: error.message };
     }
   }
 
   // Тестирование подключения к MoySklad
   async testConnection() {
     try {
+      console.log('Testing connection to MoySklad...');
+      
       const client = this.createAuthenticatedClient();
       
-      // Проверяем токен
-      console.log('Проверяем токен MoySklad...');
-      console.log('Токен:', this.apiToken ? `${this.apiToken.substring(0, 10)}...` : 'НЕ УСТАНОВЛЕН');
+      // Тестируем доступ к товарам
+      const productsResponse = await this.executeRequest(() => client.get('/entity/product?limit=1'));
+      const productsCount = productsResponse.data.meta && productsResponse.data.meta.size ? productsResponse.data.meta.size : 0;
       
-      // Пробуем разные эндпоинты для диагностики
-      const endpoints = [
-        { name: 'Товары (базовый)', url: '/entity/product?limit=1' },
-        { name: 'Товары (без фильтров)', url: '/entity/product' },
-        { name: 'Категории', url: '/entity/productfolder' },
-        { name: 'Организация', url: '/entity/organization' },
-        { name: 'Склад', url: '/entity/store' }
-      ];
+      // Тестируем доступ к категориям
+      const categoriesResponse = await this.executeRequest(() => client.get('/entity/productfolder?limit=1'));
+      const categoriesCount = categoriesResponse.data.meta && categoriesResponse.data.meta.size ? categoriesResponse.data.meta.size : 0;
       
-      const results = [];
-      
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`Тестируем ${endpoint.name}...`);
-          const response = await client.get(endpoint.url, {
-            headers: {
-              'Accept': 'application/json;charset=utf-8'
-            },
-            timeout: 10000
-          });
-          
-          results.push({
-            endpoint: endpoint.name,
-            status: 'success',
-            statusCode: response.status,
-            data: response.data
-          });
-          
-          console.log(`✅ ${endpoint.name}: ${response.status} - ${(response.data.meta && response.data.meta.size) || 'N/A'} записей`);
-          
-        } catch (error) {
-          results.push({
-            endpoint: endpoint.name,
-            status: 'error',
-            statusCode: (error.response && error.response.status) || 'unknown',
-            error: error.message
-          });
-          
-          console.log(`❌ ${endpoint.name}: ${(error.response && error.response.status) || 'unknown'} - ${error.message}`);
-        }
-      }
-      
-      // Анализируем результаты
-      const successfulEndpoints = results.filter(r => r.status === 'success');
-      const failedEndpoints = results.filter(r => r.status === 'error');
-      
-      if (successfulEndpoints.length > 0) {
-        const productEndpoint = successfulEndpoints.find(r => r.endpoint.includes('Товары'));
-        if (productEndpoint) {
-          return {
-            success: true,
-            message: 'Подключение к MoySklad успешно',
-                    productCount: (productEndpoint.data.meta && productEndpoint.data.meta.size) || 0,
-        sampleProduct: (productEndpoint.data.rows && productEndpoint.data.rows[0] && productEndpoint.data.rows[0].name) || 'Нет товаров',
-            diagnostics: results
-          };
-        }
-      }
+      console.log(`Connection test successful: ${productsCount} products, ${categoriesCount} categories`);
       
       return {
-        success: false,
-        message: 'Проблемы с подключением к MoySklad',
-        diagnostics: results,
-        recommendations: [
-          'Проверьте правильность токена доступа',
-          'Убедитесь, что токен имеет права на чтение товаров',
-          'Проверьте, что токен не истек',
-          'Убедитесь, что в MoySklad есть товары'
-        ]
+        success: true,
+        message: 'Подключение к MoySklad успешно',
+        productsCount: productsCount,
+        categoriesCount: categoriesCount,
+        apiToken: this.apiToken ? 'Установлен' : 'Не установлен',
+        accountId: this.accountId ? 'Установлен' : 'Не установлен'
       };
-      
     } catch (error) {
-      console.error('Error testing MoySklad connection:', error.message);
+      console.error('Connection test failed:', error.message);
+      
+      let errorMessage = 'Ошибка подключения к MoySklad';
+      
+      if (error.response && error.response.status === 401) {
+        errorMessage = 'Неверный токен API';
+      } else if (error.response && error.response.status === 403) {
+        errorMessage = 'Нет доступа к API';
+      } else if (error.response && error.response.status === 429) {
+        errorMessage = 'Превышен лимит запросов';
+      } else if (error.response && error.response.status === 412) {
+        errorMessage = 'Ошибка предварительного условия (слишком частые запросы)';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Превышено время ожидания';
+      } else if (error.message.includes('Network Error')) {
+        errorMessage = 'Ошибка сети';
+      }
+      
       return {
         success: false,
-        message: `Ошибка подключения к MoySklad: ${error.message}`,
+        message: errorMessage,
         error: error.message,
-        recommendations: [
-          'Проверьте правильность токена доступа',
-          'Убедитесь, что токен имеет права на чтение товаров'
-        ]
+        status: error.response ? error.response.status : null,
+        productsCount: 0,
+        categoriesCount: 0,
+        apiToken: this.apiToken ? 'Установлен' : 'Не установлен',
+        accountId: this.accountId ? 'Установлен' : 'Не установлен'
       };
     }
   }
 
   // Получение списка видимых категорий
   getVisibleCategoryIds() {
-    const settings = this.loadCategorySettings();
-    
-    // Если файл настроек не существует или пустой, все категории видимые
-    if (!settings || Object.keys(settings).length === 0) {
-      console.log('Файл настроек категорий не найден, все категории видимые');
-      return null; // null означает "все категории видимые"
-    }
-    
-    const visibleIds = [];
-    Object.keys(settings).forEach(categoryId => {
-      if (settings[categoryId]) {
-        visibleIds.push(categoryId);
+    try {
+      const settings = this.loadCategorySettings();
+      if (settings.visibleCategories === null) {
+        return null; // Все категории видимые
       }
-    });
-    
-    console.log(`Найдено ${visibleIds.length} видимых категорий из ${Object.keys(settings).length} настроенных`);
-    return visibleIds;
+      return settings.visibleCategories || [];
+    } catch (error) {
+      console.error('Error getting visible category IDs:', error.message);
+      return [];
+    }
   }
 
   // Проверка видимости категории
   isCategoryVisible(categoryId) {
-    // Виртуальная категория "all" всегда видима
-    if (categoryId === 'all') {
-      return true;
+    try {
+      const visibleCategoryIds = this.getVisibleCategoryIds();
+      if (visibleCategoryIds === null) {
+        return true; // Все категории видимые
+      }
+      return visibleCategoryIds.includes(categoryId);
+    } catch (error) {
+      console.error('Error checking category visibility:', error.message);
+      return false;
     }
-    
-    const settings = this.loadCategorySettings();
-    
-    // Если файл настроек не существует или пустой, все категории видимые
-    if (!settings || Object.keys(settings).length === 0) {
-      return true;
-    }
-    
-    return settings[categoryId] !== undefined ? settings[categoryId] : true;
   }
 
-  // Сброс всех настроек категорий (все категории видимые)
+  // Сброс настроек категорий
   resetCategorySettings() {
     try {
-      const settingsFile = path.join(__dirname, '../data/category-settings.json');
-      if (fs.existsSync(settingsFile)) {
-        fs.unlinkSync(settingsFile);
+      const defaultSettings = {
+        visibleCategories: null, // null означает, что все категории видимые
+        lastUpdated: new Date().toISOString()
+      };
+      
+      const success = this.saveCategorySettings(defaultSettings);
+      
+      if (success) {
+        console.log('Category settings reset to default');
+        return { success: true, message: 'Настройки категорий сброшены' };
+      } else {
+        console.error('Failed to reset category settings');
+        return { success: false, message: 'Ошибка при сбросе настроек' };
       }
-      console.log('Category settings reset successfully');
-      return { success: true, message: 'Настройки категорий сброшены' };
     } catch (error) {
       console.error('Error resetting category settings:', error.message);
-      throw error;
+      return { success: false, message: error.message };
     }
-  }
-
-  // Execute request with retry logic
-  async executeRequest(request) {
-    let lastError;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      try {
-        const response = await request();
-        return response;
-      } catch (error) {
-        lastError = error;
-        // Don't retry on 403 (forbidden) or 401 (unauthorized)
-        if (error.response && (error.response.status === 403 || error.response.status === 401)) {
-          throw error;
-        }
-        // Handle rate limiting (429)
-        if (error.response && error.response.status === 429) {
-          const retryAfter = error.response.headers && error.response.headers['retry-after'] ? parseInt(error.response.headers['retry-after'], 10) : 60;
-          console.log(`Rate limited (429). Waiting ${retryAfter} seconds before retry...`);
-          await this.delay(retryAfter * 1000);
-          continue;
-        }
-        // Exponential backoff for other errors
-        if (attempt < this.maxRetries) {
-          const delay = this.baseDelay * Math.pow(2, attempt);
-          console.log(`Request failed (attempt ${attempt + 1}/${this.maxRetries + 1}). Retrying in ${delay}ms...`);
-          await this.delay(delay);
-        }
-      }
-    }
-    throw lastError;
   }
 }
 
-module.exports = new MoyskladService(); 
+module.exports = MoyskladService; 
