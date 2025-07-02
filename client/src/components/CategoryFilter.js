@@ -34,10 +34,12 @@ const CategoryFilter = ({ categories, selectedCategory, onCategorySelect, onRese
               onClick={() => handleCategoryClick(category.id)}
             >
               <span className="category-name">{category.name}</span>
-              {category.productCount > 0 && (
-                <span className="category-count">
+              {category.productCount && (
+                <span className={`category-count ${typeof category.productCount === 'string' && category.productCount.startsWith('~') ? 'approximate' : ''}`}>
                   <Package size={12} />
-                  {category.productCount}
+                  {typeof category.productCount === 'string' && category.productCount.startsWith('~') 
+                    ? category.productCount 
+                    : category.productCount}
                 </span>
               )}
             </button>

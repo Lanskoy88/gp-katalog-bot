@@ -410,11 +410,16 @@ class MoyskladService {
       if (allCategories.length <= 20) {
         await this.fetchCategoriesWithProductCounts(allCategories);
       } else {
-        console.log(`Слишком много категорий (${allCategories.length}), пропускаем получение количества товаров`);
-        // Устанавливаем примерное количество товаров на категорию
+        console.log(`Слишком много категорий (${allCategories.length}), получаем точное количество для первых 20`);
+        // Получаем точное количество для первых 20 категорий
+        const first20Categories = allCategories.slice(0, 20);
+        await this.fetchCategoriesWithProductCounts(first20Categories);
+        
+        // Для остальных категорий ставим "~" (приблизительное значение)
+        const remainingCategories = allCategories.slice(20);
         const avgProductsPerCategory = Math.floor(totalProducts / allCategories.length);
-        allCategories.forEach(category => {
-          category.productCount = avgProductsPerCategory;
+        remainingCategories.forEach(category => {
+          category.productCount = `~${avgProductsPerCategory}`;
         });
       }
       
@@ -503,10 +508,16 @@ class MoyskladService {
       if (categories.length <= 20) {
         await this.fetchCategoriesWithProductCounts(categories);
       } else {
-        console.log(`Слишком много категорий (${categories.length}), пропускаем получение количества товаров`);
-        // Устанавливаем примерное количество товаров на категорию
-        categories.forEach(category => {
-          category.productCount = 0; // Для админки можно показать 0
+        console.log(`Слишком много категорий (${categories.length}), получаем точное количество для первых 20`);
+        // Получаем точное количество для первых 20 категорий
+        const first20Categories = categories.slice(0, 20);
+        await this.fetchCategoriesWithProductCounts(first20Categories);
+        
+        // Для остальных категорий ставим "~" (приблизительное значение)
+        const remainingCategories = categories.slice(20);
+        const avgProductsPerCategory = Math.floor(810 / categories.length); // Примерное количество
+        remainingCategories.forEach(category => {
+          category.productCount = `~${avgProductsPerCategory}`;
         });
       }
       
