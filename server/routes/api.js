@@ -1,7 +1,10 @@
 const express = require('express');
-const moyskladService = require('../services/moyskladService');
+const MoyskladService = require('../services/moyskladService');
 
 const router = express.Router();
+
+// Создаем экземпляр сервиса
+const moyskladService = new MoyskladService();
 
 // Получение товаров с пагинацией
 router.get('/products', async (req, res) => {

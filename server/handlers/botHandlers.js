@@ -1,6 +1,10 @@
-const moyskladService = require('../services/moyskladService');
+const MoyskladService = require('../services/moyskladService');
 
 class BotHandlers {
+  constructor() {
+    // Создаем экземпляр сервиса
+    this.moyskladService = new MoyskladService();
+  }
   setup(bot) {
     // Проверяем, что бот существует и валиден
     if (!bot) {
@@ -193,7 +197,7 @@ class BotHandlers {
   // Обработка показа категорий
   async handleCategories(chatId, bot) {
     try {
-      const categories = await moyskladService.getCategories();
+      const categories = await this.moyskladService.getCategories();
       
       const keyboard = {
         inline_keyboard: categories.slice(0, 10).map(category => [
@@ -216,7 +220,7 @@ class BotHandlers {
   // Обработка выбора категории
   async handleCategorySelection(chatId, categoryId, bot) {
     try {
-      const products = await moyskladService.getProductsWithImages(1, 5, categoryId);
+      const products = await this.moyskladService.getProductsWithImages(1, 5, categoryId);
       
       if (products.products.length === 0) {
         await bot.sendMessage(chatId, 'В этой категории пока нет товаров.');
@@ -270,8 +274,8 @@ class BotHandlers {
   // Обработка статистики администратора
   async handleAdminStats(chatId, bot) {
     try {
-      const categories = await moyskladService.getCategories();
-      const products = await moyskladService.getProducts(1, 1);
+      const categories = await this.moyskladService.getCategories();
+      const products = await this.moyskladService.getProducts(1, 1);
       
       const stats = `📊 Статистика каталога:\n\n` +
                    `📁 Категорий: ${categories.length}\n` +

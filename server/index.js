@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-const moyskladService = require('./services/moyskladService');
+const MoyskladService = require('./services/moyskladService');
 const botHandlers = require('./handlers/botHandlers');
 const apiRoutes = require('./routes/api');
 
