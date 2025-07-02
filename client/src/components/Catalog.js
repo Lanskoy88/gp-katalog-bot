@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Search, Package, Filter } from 'lucide-react';
+import { Search, Package, Filter, Folder } from 'lucide-react';
 import ProductCard from './ProductCard';
 import CategoryFilter from './CategoryFilter';
 import LoadingSkeleton from './LoadingSkeleton';
@@ -24,6 +24,30 @@ const useDebounce = (value, delay) => {
   return debouncedValue;
 };
 
+// Компонент для группировки товаров по категориям
+const ProductGroup = ({ category, products, onProductClick }) => {
+  if (!products || products.length === 0) return null;
+
+  return (
+    <div className="product-group">
+      <div className="category-header">
+        <Folder size={20} />
+        <h3>{category.name}</h3>
+        <span className="product-count">({products.length} товаров)</span>
+      </div>
+      <div className="products-grid">
+        {products.map(product => (
+          <ProductCard 
+            key={product.id} 
+            product={product} 
+            onClick={() => onProductClick(product)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const Catalog = ({ tg }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
@@ -36,6 +60,7 @@ const Catalog = ({ tg }) => {
   const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
   const [showFilters, setShowFilters] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [groupByCategory, setGroupByCategory] = useState(true); // Группировка по категориям
 
   // Дебаунс для поиска (500ms)
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
@@ -113,6 +138,42 @@ const Catalog = ({ tg }) => {
     loadProducts(1, true);
   }, [selectedCategory, debouncedSearchQuery]);
 
+  // Группировка товаров по категориям
+  const groupedProducts = useMemo(() => {
+    if (!groupByCategory || selectedCategory || debouncedSearchQuery) {
+      return null; // Не группируем если выбрана конкретная категория или есть поиск
+    }
+
+    const groups = {};
+    const uncategorized = [];
+
+    products.forEach(product => {
+      if (product.categoryId && product.categoryName) {
+        if (!groups[product.categoryId]) {
+          groups[product.categoryId] = {
+            id: product.categoryId,
+            name: product.categoryName,
+            products: []
+          };
+        }
+        groups[product.categoryId].products.push(product);
+      } else {
+        uncategorized.push(product);
+      }
+    });
+
+    // Добавляем товары без категории в отдельную группу
+    if (uncategorized.length > 0) {
+      groups['uncategorized'] = {
+        id: 'uncategorized',
+        name: 'Без категории',
+        products: uncategorized
+      };
+    }
+
+    return Object.values(groups);
+  }, [products, groupByCategory, selectedCategory, debouncedSearchQuery]);
+
   // Обработка поиска
   const handleSearch = (query) => {
     setSearchQuery(query);
@@ -130,6 +191,18 @@ const Catalog = ({ tg }) => {
     setSelectedCategory('');
     setSearchQuery('');
     setSearchParams({});
+  };
+
+  // Обработка клика по товару
+  const handleProductClick = (product) => {
+    if (tg) {
+      tg.sendData(JSON.stringify({
+        action: 'product_selected',
+        productId: product.id,
+        productName: product.name,
+        category: product.categoryName || 'Без категории'
+      }));
+    }
   };
 
   // Загрузка следующей страницы
@@ -242,11 +315,12 @@ const Catalog = ({ tg }) => {
           scrollThreshold={0.8}
         >
           <div className="products-grid">
-            {products.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                tg={tg}
+            {groupedProducts && groupedProducts.map((group) => (
+              <ProductGroup
+                key={group.id}
+                category={group}
+                products={group.products}
+                onProductClick={handleProductClick}
               />
             ))}
           </div>

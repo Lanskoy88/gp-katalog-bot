@@ -145,7 +145,7 @@ class MoyskladService {
           console.log('Все категории видимые, загружаем все товары');
           
           // Увеличиваем лимит для получения большего количества товаров
-          const increasedLimit = Math.max(limit, 200);
+          const increasedLimit = Math.max(limit, 500);
           let url = `/entity/product?limit=${increasedLimit}&offset=${(page - 1) * increasedLimit}`;
           
           // Поиск по названию (если есть)
@@ -343,6 +343,12 @@ class MoyskladService {
       
       return categories;
     } catch (error) {
+      console.error('Ошибка при получении категорий:', error.message);
+      if (error.response) {
+        console.error('Статус ответа:', error.response.status);
+        console.error('Данные ответа:', error.response.data);
+      }
+      
       if (error.response && error.response.status === 403) {
         console.log('Нет доступа к категориям товаров (403), создаем виртуальную категорию "Все товары"');
         // Создаем виртуальную категорию "Все товары"
@@ -354,8 +360,16 @@ class MoyskladService {
           productCount: 0
         }];
       }
-      console.error('Error getting categories:', error.message);
-      throw error;
+      
+      // В случае других ошибок тоже возвращаем виртуальную категорию
+      console.log('Возвращаем виртуальную категорию "Все товары" из-за ошибки');
+      return [{
+        id: 'all',
+        name: 'Все товары',
+        description: 'Все доступные товары',
+        pathName: 'Все товары',
+        productCount: 0
+      }];
     }
   }
 
@@ -636,7 +650,7 @@ class MoyskladService {
           console.log('Все категории видимые, загружаем все товары');
           
           // Увеличиваем лимит для получения большего количества товаров
-          const increasedLimit = Math.max(limit, 200);
+          const increasedLimit = Math.max(limit, 500);
           let url = `/entity/product?limit=${increasedLimit}&offset=${(page - 1) * increasedLimit}`;
           
           // Поиск по названию (если есть)
