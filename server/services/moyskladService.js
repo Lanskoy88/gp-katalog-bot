@@ -28,8 +28,8 @@ class MoyskladService {
     this.requestQueue = [];
     this.isProcessing = false;
     this.lastRequestTime = 0;
-    this.minRequestInterval = 100; // 100ms между запросами (10 запросов/сек)
-    this.maxConcurrentRequests = 3; // Максимум 3 параллельных запроса
+    this.minRequestInterval = 500; // 500ms между запросами (2 запроса/сек)
+    this.maxConcurrentRequests = 1; // Максимум 1 параллельный запрос
     this.activeRequests = 0;
     
     // Retry settings с экспоненциальной задержкой
@@ -135,7 +135,7 @@ class MoyskladService {
         this.lastResetTime = now;
       }
 
-      if (this.requestCount >= 45) { // Лимит: 45 запросов за 3 секунды
+      if (this.requestCount >= 20) { // Лимит: 20 запросов за 3 секунды
         console.log('⚠️ Достигнут лимит запросов, ждем...');
         await this.delay(3000 - (now - this.lastResetTime));
         this.requestCount = 0;
@@ -408,7 +408,11 @@ class MoyskladService {
 
       // Получаем количество товаров для всех категорий (с ограничением)
       if (allCategories.length <= 20) {
-        await this.fetchCategoriesWithProductCounts(allCategories);
+        // Временно отключаем подсчёт для избежания ошибок 412
+        console.log('Отключаем подсчёт товаров в категориях для избежания ошибок 412');
+        allCategories.forEach(category => {
+          category.productCount = '~'; // Показываем что товары есть, но количество неизвестно
+        });
       } else {
         console.log(`Слишком много категорий (${allCategories.length}), получаем точное количество для первых 20`);
         // Получаем точное количество для первых 20 категорий
@@ -506,7 +510,11 @@ class MoyskladService {
 
       // Получаем количество товаров для всех категорий (с ограничением)
       if (categories.length <= 20) {
-        await this.fetchCategoriesWithProductCounts(categories);
+        // Временно отключаем подсчёт для избежания ошибок 412
+        console.log('Отключаем подсчёт товаров в категориях для избежания ошибок 412');
+        categories.forEach(category => {
+          category.productCount = '~'; // Показываем что товары есть, но количество неизвестно
+        });
       } else {
         console.log(`Слишком много категорий (${categories.length}), получаем точное количество для первых 20`);
         // Получаем точное количество для первых 20 категорий
