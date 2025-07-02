@@ -316,13 +316,4 @@ router.post('/reset-category-settings', async (req, res) => {
   }
 });
 
-module.exports = router; // Сброс настроек категорий
-router.post("/reset-category-settings", async (req, res) => {
-  try {
-    const result = await moyskladService.resetCategorySettings();
-    res.json(result);
-  } catch (error) {
-    console.error("Error in /reset-category-settings:", error);
-    res.status(500).json({ error: "Failed to reset category settings" });
-  }
-});
+module.exports = router;
