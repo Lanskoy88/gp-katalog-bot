@@ -200,6 +200,38 @@ router.get('/diagnostics', async (req, res) => {
   }
 });
 
+// Тестовый endpoint для получения сырых данных товара от MoySklad API
+router.get('/test-raw-product', async (req, res) => {
+  try {
+    const client = moyskladService.createAuthenticatedClient();
+    const response = await client.get('/entity/product?limit=1');
+    
+    if (response.data && response.data.rows && response.data.rows.length > 0) {
+      const rawProduct = response.data.rows[0];
+      res.json({
+        success: true,
+        rawProduct: rawProduct,
+        productFolder: rawProduct.productFolder,
+        hasProductFolder: !!rawProduct.productFolder,
+        productFolderId: rawProduct.productFolder ? rawProduct.productFolder.id : null,
+        productFolderName: rawProduct.productFolder ? rawProduct.productFolder.name : null,
+        allFields: Object.keys(rawProduct)
+      });
+    } else {
+      res.json({
+        success: false,
+        message: 'No products found'
+      });
+    }
+  } catch (error) {
+    console.error('Error in /test-raw-product:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch raw product data',
+      message: error.message 
+    });
+  }
+});
+
 // Поиск товаров
 router.get('/search', async (req, res) => {
   try {
