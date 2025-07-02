@@ -657,52 +657,14 @@ class MoyskladService {
   // Получение товаров с изображениями
   async getProductsWithImages(page = 1, limit = 100, categoryId = null, search = null) {
     try {
+      console.log(`getProductsWithImages called with: page=${page}, limit=${limit}, categoryId=${categoryId}, search=${search}`);
+      
       const productsData = await this.getProducts(page, limit, categoryId, search);
       
-      // Обрабатываем товары для добавления информации о категориях и изображениях
-      const processedProducts = productsData.products.map(product => {
-        // Извлекаем информацию о категории
-        let categoryId = null;
-        let categoryName = null;
-        
-        if (product.productFolder) {
-          categoryId = product.productFolder.meta.href.split('/').pop();
-          categoryName = product.productFolder.name || 'Без названия';
-        }
-
-        // Извлекаем цену
-        let price = 0;
-        if (product.salePrices && product.salePrices.length > 0) {
-          // Ищем первую ненулевую цену
-          const nonZeroPrice = product.salePrices.find(p => p.value > 0);
-          if (nonZeroPrice) {
-            price = nonZeroPrice.value / 100; // Цена в копейках
-          }
-        }
-
-        return {
-          id: product.id,
-          name: product.name,
-          code: product.code || '',
-          description: product.description || '',
-          price: price,
-          categoryId: categoryId,
-          categoryName: categoryName,
-          pathName: product.pathName || '',
-          hasImages: product.images && product.images.meta && product.images.meta.size > 0,
-          imageCount: product.images && product.images.meta ? product.images.meta.size : 0,
-          archived: product.archived || false,
-          updated: product.updated || ''
-        };
-      });
-
-      return {
-        products: processedProducts,
-        total: productsData.total,
-        page: productsData.page,
-        limit: productsData.limit,
-        hasMore: productsData.hasMore
-      };
+      console.log(`getProducts returned: ${productsData.products.length} products, total: ${productsData.total}`);
+      
+      // getProducts уже возвращает обработанные данные, просто возвращаем их
+      return productsData;
     } catch (error) {
       console.error('Error in getProductsWithImages:', error.message);
       throw error;
