@@ -226,10 +226,13 @@ class MoyskladService {
   // Получение товаров с фильтрацией по видимым категориям
   async getProducts(page = 1, limit = 100, categoryId = null, search = null) {
     try {
+      console.log(`getProducts called with: page=${page}, limit=${limit}, categoryId=${categoryId}, search=${search}`);
+      
       const client = this.createAuthenticatedClient();
       
       // Фильтрация по категории (если указана)
       if (categoryId && categoryId !== 'all') {
+        console.log(`Filtering by specific category: ${categoryId}`);
         // Проверяем, что запрашиваемая категория видима
         if (!this.isCategoryVisible(categoryId)) {
           console.log(`Категория ${categoryId} скрыта, возвращаем пустой результат`);
@@ -261,6 +264,8 @@ class MoyskladService {
       } else {
         // Если категория не указана, фильтруем по видимым категориям
         const visibleCategoryIds = this.getVisibleCategoryIds();
+        console.log(`Visible category IDs:`, visibleCategoryIds);
+        
         if (visibleCategoryIds === null) {
           // Все категории видимые, загружаем все товары с увеличенным лимитом
           console.log('Все категории видимые, загружаем все товары');
@@ -281,9 +286,11 @@ class MoyskladService {
             }
           }));
           
+          console.log('Response received, processing...');
           return await this.processProductsResponse(response, page, limit, null);
           
         } else if (visibleCategoryIds.length > 0) {
+          console.log(`Фильтруем по ${visibleCategoryIds.length} видимым категориям`);
           // Разбиваем длинные фильтры на несколько запросов
           const maxCategoriesPerRequest = 5; // Уменьшаем для соблюдения лимитов
           let allProducts = [];
@@ -320,6 +327,7 @@ class MoyskladService {
           
           return await this.processProductsResponse({ data: { rows: paginatedProducts, meta: { size: totalCount } } }, page, limit, null);
         } else {
+          console.log('Нет видимых категорий, возвращаем пустой результат');
           // Нет видимых категорий
           return {
             products: [],
@@ -332,6 +340,10 @@ class MoyskladService {
       }
     } catch (error) {
       console.error('Error in getProducts:', error.message);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', error.response.data);
+      }
       throw error;
     }
   }
