@@ -315,12 +315,11 @@ const Catalog = ({ tg }) => {
           scrollThreshold={0.8}
         >
           <div className="products-grid">
-            {groupedProducts && groupedProducts.map((group) => (
-              <ProductGroup
-                key={group.id}
-                category={group}
-                products={group.products}
-                onProductClick={handleProductClick}
+            {products.map(product => (
+              <ProductCard 
+                key={product.id} 
+                product={product} 
+                tg={tg}
               />
             ))}
           </div>
